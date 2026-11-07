@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0d0c">
+<title>Spine · The DVD register</title>
+<!--meta-->
+<link rel="icon" href="/img/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/app.css">
+<script type="module" src="/js/app.js"></script>
+</head>
+<body>
+<a class="skip" href="#app">Skip to content</a>
+<header class="top"><div class="wrap">
+  <a class="logo" href="/"><b>Spine<i>.</i></b><span>The DVD register</span></a>
+  <nav class="main" aria-label="Main">
+    <a href="/browse" data-nav="browse">Browse</a>
+    <a href="/labels" data-nav="labels">Labels</a>
+    <a href="/lists" data-nav="lists">Lists</a>
+    <a href="/collection" data-nav="collection" data-auth>Collection</a>
+    <a href="/wantlist" data-nav="wantlist" data-auth>Wantlist</a>
+  </nav>
+  <form class="search" id="search" role="search" action="/browse">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" name="q" type="search" placeholder="Title, director, label, barcode…" autocomplete="off" aria-label="Search the register">
+  </form>
+  <div class="userbox" id="userbox"></div>
+</div></header>
+
+<main id="app" tabindex="-1"></main>
+
+<nav class="tabs" aria-label="Main">
+  <a href="/browse" data-nav="browse"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>Browse</a>
+  <a href="/add" data-nav="add"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12"/></svg>Scan</a>
+  <a href="/collection" data-nav="collection"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 4v16M9 4v16M13 5l4 15M19 4v16"/></svg>Shelf</a>
+  <a href="/wantlist" data-nav="wantlist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/></svg>Wants</a>
+  <a href="/me" data-nav="me"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Me</a>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div id="modal-root"></div>
+<footer class="foot"><div class="wrap">
+  <span>Spine · a register of DVD editions, built by collectors.</span>
+  <a href="/about">About</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/guidelines">Contributor guide</a>
+</div></footer>
+</body>
+</html>
