@@ -501,6 +501,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums }
 .copies { display: flex; flex-direction: column; gap: 6px; margin-top: 10px }
 .copies button { display: flex; justify-content: space-between; gap: 10px; align-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 9px 12px; font-size: 13px; text-align: left }
 .copies button.on { border-color: var(--accent); background: var(--accent-soft) }
+.copies button svg { width: 18px; height: 18px; color: var(--accent); flex: none }
 .filmpick { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; margin-top: 10px }
 .filmpick button { display: grid; grid-template-columns: 32px 1fr; gap: 10px; align-items: center; border: 0; background: none; padding: 6px 8px; border-radius: 10px; text-align: left }
 .filmpick button:hover { background: var(--fill) }
