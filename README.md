@@ -1,37 +1,49 @@
 # Spine
 
-A register of DVD editions, kept by collectors. It's like Discogs for DVDs, without the marketplace.
+Films, the discs they came on, and the people who keep them.
 
-Spine treats the **edition** as the thing you collect: the label, spine number, region, video standard, transfer and supplements. Films group editions together, labels show their numbered run with the gaps, and every change to the catalogue is moderated and kept in history.
+Spine is a film diary in the Letterboxd mould, joined to a Discogs-style register of DVD editions. You log what you watch (and whether it was your own disc, a stream or a cinema), rate and review it, follow friends, keep a shelf of the exact editions you own, and hunt for the ones you don't. No marketplace yet; that comes later.
 
 ## What's in it
 
-- **Catalogue:** films, editions, labels and directors. Search tolerates typos and also finds editions by barcode (UPC/EAN).
-- **Scan to shelf:** point your phone at the barcode on the back of a DVD and it goes straight onto your shelf, or your wantlist. The camera keeps scanning, so you can work through a whole stack. Each scan can be undone or graded. Duplicates, discs that share a barcode, and barcodes Spine doesn't know yet are all handled. An unknown disc hands off to "add an edition" with the barcode already filled in, and lands on your shelf once it's approved.
-- **Adding editions:** scan a barcode with the phone camera or type it. Spine checks whether the edition already exists, then lets you pick the film (from the register or from TMDB) and enter the details printed on the case.
-- **Moderation:** new members' additions and edits wait in a queue. After 10 approved contributions a member's edits go live straight away. Every change is stored with a before/after diff. Moderators can merge duplicate editions, which moves everyone's copies, wants, reviews, lists and photos.
-- **Collection:** each copy you own has its own disc and case grade, price paid, date, tags and notes. View it as a shelf of spines, as covers, or as a table, with breakdowns by region, decade, label and condition. You can import and export it as CSV.
-- **Wantlist:** you're notified when a new edition of a film you own or want is added.
-- **Community:** ratings and reviews, ordered lists with notes, public profiles, and a private-collection setting.
-- **Photos:** members upload their own scans of cases and discs. Until a scan exists, Spine draws an original placeholder cover.
-- **Accounts:** sign-up and sign-in, password change, GDPR data export (JSON) and account deletion. The first account to sign up becomes the admin.
+**Diary and reviews**
+- Log a film in a sheet: date, where you watched it (your own DVD, picked from your shelf; Netflix; Prime Video; Disney+; Apple TV; MUBI; cinema; TV), half-star rating, like, rewatch, review, spoiler flag.
+- Diary by month and year, films grid, reviews with permalinks and likes, watchlist, liked films, four favourite films on your profile.
+- Reviews written on a specific disc appear on that edition's page as well as the film's.
+
+**Friends**
+- Follow people. The Friends tab shows their activity (watches, reviews, discs added, lists), who you follow, who follows you, and suggestions ranked by the films and discs you have in common.
+- Film pages show which friends have watched it, how they rated it, which of them own it on disc and which edition. Edition pages show which friends have that disc or want it.
+- Public profiles with a collection, diary, watchlist and lists; each can be made private in settings.
+- Compare two members: taste match, films you've both seen with both ratings, films they've seen that you haven't, discs on their shelf that aren't on yours.
+
+**Streaming services**
+- Netflix, Prime Video and the rest offer no API for viewing history, so Spine takes the history file they let you download (Netflix: *Account → Viewing activity → Download all*; Amazon: *Request your data*). It skips TV episodes, trailers and autoplayed previews, matches titles to films on the register (with fuzzy matching and a review step), and logs each viewing with the right date.
+- Trakt is a real API. Connect it once (set `TRAKT_CLIENT_ID` and `TRAKT_CLIENT_SECRET`) and Spine pulls new movie history every time you open the app. Trakt's free scrobbler extensions record what you play on Netflix, Prime Video, Disney+ and others.
+- Anything logged from a service waits for a rating: the next time you open Spine, a sheet asks you to rate or review it, skip it, or say you didn't watch it.
+
+**The register**
+- Films, editions, labels and directors. Search tolerates typos and finds editions by barcode.
+- Scan to shelf: point your phone at the barcode on the back of a case and the exact edition lands on your shelf; keep scanning through a stack. Works in every browser; a photo of the barcode or typing it also works.
+- Adding and editing editions goes through moderation for new members; after ten approved contributions edits go live immediately. Every change is kept with a before/after diff. Moderators can merge duplicates.
+- Collection with disc and case grades, price paid, tags and notes; shelf, cover and table views; CSV import and export.
+
+**App**
+- An Apple-style interface: system type, light and dark (follows the device or your choice), translucent bars, a bottom tab bar on phones.
+- Installable on iPhone from Safari's share sheet ("Add to Home Screen"); the app shell works offline.
+- Accounts, password change, data export (JSON) and account deletion. The first account to sign up becomes the admin.
 
 ## Run it
 
-You need **Node.js 22.13 or newer**. There are no npm dependencies: the server uses Node's built-in `http` and `node:sqlite`.
+You need **Node.js 22.13 or newer**. There are no npm dependencies.
 
 ```sh
-npm run seed     # optional: demo catalogue + two demo accounts
+npm run seed     # optional: demo catalogue and four demo members who follow each other
 npm start        # http://localhost:3000
+npm test         # API, scanner and import tests against throwaway databases
 ```
 
-The demo sign-ins are `demo` / `spine-demo` (admin) and `cinephile` / `spine-demo` (member). The demo films are real, but the labels, catalogue numbers and barcodes are invented. **Do not seed a production database.**
-
-To run the tests:
-
-```sh
-npm test         # API tests against a throwaway database
-```
+Demo sign-ins (password `spine-demo`): `demo` (admin, has a Netflix import waiting for ratings), `cinephile`, `nour`, `tomas`. The demo films are real; labels, catalogue numbers and barcodes are invented. **Don't seed a production database.**
 
 ### Settings (environment variables)
 
@@ -39,44 +51,63 @@ npm test         # API tests against a throwaway database
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP port |
 | `DATA_DIR` | `./data` | Where `spine.db` and `uploads/` live. Back this folder up. |
-| `TMDB_API_KEY` | unset | Turns on film lookup when adding editions. Accepts a TMDB v3 key or a v4 read token. Without it, members type film details by hand. |
+| `TMDB_API_KEY` | unset | Film lookup when adding editions (v3 key or v4 read token). |
+| `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | unset | Turns on the Trakt connection. Create an app at trakt.tv/oauth/applications with redirect URI `https://your-host/api/streaming/trakt/callback`. |
 | `SECURE_COOKIES` | unset | Set to `1` when serving over HTTPS. |
 
 ## Deploy
 
-Spine is a single process with a SQLite file, so any host that runs Node or Docker and gives you a persistent disk will work (Fly.io, Railway, Render, a small VPS).
+One Node process and a SQLite file. Any host with Node or Docker and a persistent disk works (Fly.io, Railway, Render, a small VPS).
 
 ```sh
 docker build -t spine .
-docker run -p 3000:3000 -v spine-data:/data -e TMDB_API_KEY=... spine
+docker run -p 3000:3000 -v spine-data:/data -e SECURE_COOKIES=1 -e TMDB_API_KEY=... spine
 ```
 
-Put it behind HTTPS. Camera barcode scanning only works on HTTPS or on `localhost`. Back up `DATA_DIR` regularly; copying `spine.db` while the server is running is safe because Spine uses WAL mode.
+Serve it over HTTPS: the camera scanner and the service worker need it, and iPhone home-screen installs expect it.
+
+## iPhone
+
+For a handful of people, the fastest path is the web app: open the site in Safari, Share → Add to Home Screen. It runs full-screen with the tab bar, remembers sign-in, and the camera scanner works. When you want an App Store listing, wrap the same site with Capacitor (a thin native shell around this web app) and add push notifications there; nothing in the UI needs rewriting.
 
 ## How it's built
 
 ```
 server/
-  index.js          starts the HTTP server
-  app.js            router, static files, security headers, CSRF and error handling
-  db.js             schema and migrations (append new ones to MIGRATIONS)
-  auth.js           scrypt passwords and cookie sessions
-  catalogue.js      validation, search, applying moderated submissions, merging
-  routes/           auth, catalogue, submissions, collection, social, account
-  seed.js           demo data
+  index.js            starts the HTTP server
+  app.js              router, static files, security headers, CSRF, error handling
+  db.js               schema and migrations (append new ones to MIGRATIONS)
+  auth.js             scrypt passwords and cookie sessions
+  catalogue.js        validation, search, applying moderated submissions, merging, diary and film queries
+  viewing.js          parsing Netflix/Prime history files and matching titles to films
+  routes/
+    auth.js           sign up, sign in, profile settings
+    catalogue.js      home, films, editions, labels, people, images, TMDB lookup
+    diary.js          watches, review prompts, likes, watchlist, a member's diary/reviews/films
+    friends.js        follow, friends, activity feed, people search, compare
+    streaming.js      service connections, history import, Trakt OAuth and sync
+    submissions.js    moderation queue
+    collection.js     shelf, wants, CSV import/export, profiles
+    social.js         lists, notifications
+    account.js        data export, deletion, admin
+  seed.js             demo data
 public/
-  index.html        app shell (the server adds page titles and meta tags for /release pages)
-  css/app.css       all styles
-  js/app.js         client router and header
-  js/views/         one module per page
-test/api.test.js    end-to-end API tests
+  index.html          app shell; the server adds titles and meta tags for /film and /release pages
+  css/app.css         the design system
+  js/app.js           client router, header, review prompts
+  js/ui.js            components: posters, stars, rating input, cards, sheets
+  js/forms.js         the log sheet, prompt sheet, copy and edition forms
+  js/scan.js          barcode scanning (BarcodeDetector, ZXing, built-in decoder)
+  js/views/           one module per page
+  sw.js               service worker
+test/                 api.test.js, viewing.test.js, scan.test.js
 ```
 
-Every catalogue change goes through `submissions`. Trusted members' submissions are applied immediately; everyone else's wait for a moderator. Applying a submission writes a row to `revisions`, which is how each edition's history page is built.
+Ratings are stored as 1–10 (half stars). A diary entry (`watches`) carries `via` (where it was watched) and, for `dvd`, the `copy_id` and `edition_id` it was watched on. Imported entries carry `source` (`import:netflix`, `trakt:<id>`) and a `prompt_state` that drives the "rate it?" sheet.
 
 ## Before launch
 
-- Have the privacy policy and terms (`public/js/views/pages.js`) reviewed for your jurisdiction.
-- Add email delivery (password reset, notification digests). Spine has in-app notifications only, and no password reset by email yet.
-- Consider an object store (S3 or R2) for `uploads/` if photos grow large, and a CDN in front.
-- Barcode scanning works in every browser. It uses the browser's own BarcodeDetector where available (Chrome on Android), then ZXing from unpkg, then Spine's built-in EAN-13/UPC-A/EAN-8 decoder (`public/js/scan.js`), which needs no network. Members can also take a photo of the barcode or type it. The live camera needs HTTPS (or localhost).
+- Privacy policy and terms are placeholders; have them reviewed.
+- Email isn't wired up (no password reset, no digests). Notifications are in-app only.
+- Consider object storage for `uploads/` once photos grow, and a CDN in front.
+- Trakt OAuth is implemented from the API docs but could not be exercised here (no network); test it once with real credentials.

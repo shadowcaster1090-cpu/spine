@@ -6,13 +6,14 @@ const REGIONS = [['', 'All'], ['0', 'R0'], ['1', 'R1'], ['2', 'R2'], ['3', 'R3']
 
 export default async function ({ el, query, go }) {
   const q = query.get('q') || '';
-  setTitle(q ? `“${q}”` : 'Browse');
+  setTitle(q ? `“${q}”` : 'Editions');
   document.getElementById('q').value = q;
   const [labels, res] = await Promise.all([get('/api/labels'), get('/api/editions?' + query.toString())]);
   const set = (k, val) => { const p = new URLSearchParams(query); if (val) p.set(k, val); else p.delete(k); p.delete('page'); go('/browse?' + p); };
   const chips = (k, opts) => opts.map(([v, l]) => `<button class="chip${(query.get(k) || '') === v ? ' on' : ''}" data-k="${k}" data-v="${v}">${l}</button>`).join('');
   el.innerHTML = `<div class="wrap">
-    <div class="colhead" style="padding-bottom:0"><div><div class="eyebrow">The register</div><h1 class="big">${q ? '“' + esc(q) + '”' : 'Browse'}</h1></div></div>
+    <div class="colhead" style="padding-bottom:0"><div><div class="eyebrow">The register</div><h1 class="big">${q ? '“' + esc(q) + '”' : 'Editions'}</h1></div>
+      <div class="end"><div class="segmented"><a href="/films${q ? '?q=' + encodeURIComponent(q) : ''}">Films</a><a class="on" href="/browse">Editions</a><a href="/labels">Labels</a></div></div></div>
     <div class="bar">
       <div class="grp"><span class="eyebrow">Region</span><div class="chips">${chips('region', REGIONS)}</div></div>
       <div class="grp"><span class="eyebrow">Decade</span><div class="chips">${chips('decade', DECADES)}</div></div>

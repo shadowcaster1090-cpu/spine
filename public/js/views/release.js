@@ -1,6 +1,6 @@
-import { get, post, put, del, me, isMod } from '../api.js';
-import { esc, num, cover, directors, regTag, regionText, stars, condTag, money, pad, when, modal, confirmDialog, toast, setTitle, shrinkImage, bindForm, $ } from '../ui.js';
-import { copyModal } from '../forms.js';
+import { get, post, del, me, isMod } from '../api.js';
+import { esc, num, cover, directors, regTag, regionText, stars, condTag, money, pad, modal, confirmDialog, toast, setTitle, shrinkImage, bindForm, reviewCard, wireReviews, avatar, nameOf, I, $ } from '../ui.js';
+import { copyModal, logSheet } from '../forms.js';
 
 const palRt = (rt) => Math.round(rt * 24 / 25);
 
@@ -8,6 +8,7 @@ export default async function view(ctx) {
   const { el, params, go, needLogin } = ctx;
   const d = await get(`/api/editions/${params.id}`);
   if (d.redirect) return go(`/release/${d.redirect}`, { replace: true });
+  const fr = me.user ? await get(`/api/editions/${params.id}/friends`).catch(() => ({ own: [], want: [], watched: [] })) : { own: [], want: [], watched: [] };
   const { edition: e, film: f, label, stats, mine } = d;
   const card = { ...e, title: f.title, year: f.year, palette: f.palette, directors: f.directors, label: label?.name };
   setTitle(`${f.title} (${label?.name || 'DVD'})`);
@@ -38,10 +39,12 @@ export default async function view(ctx) {
         <button class="btn${mine?.copies.length ? ' on' : ''}" style="flex:1" data-act="add">${mine?.copies.length ? `✓ In your shelf${mine.copies.length > 1 ? ' ×' + mine.copies.length : ''}` : '+ Add to shelf'}</button>
         <button class="btn${mine?.want ? ' on' : ''}" style="flex:1" data-act="want" ${mine?.copies.length ? 'disabled title="You own this"' : ''}>${mine?.want ? '♥ Wanted' : '♡ Want'}</button>
       </div>
+      ${mine?.copies.length ? `<button class="btn primary block" data-act="log">${I.eye} Log a watch on this disc</button>` : ''}
       ${mine?.copies.length ? `<div class="box"><h3>Your copies</h3>${mine.copies.map((c) => `<div class="mycopy"><span>${condTag(c.disc_cond) || '<span class="dim">Ungraded</span>'} ${condTag(c.case_cond)} <span class="dim">${esc(c.acquired)}${c.price != null ? ' · ' + money(c.price) : ''}</span></span><span class="btns"><button class="link" data-edit-copy="${c.id}">Edit</button><button class="link" data-del-copy="${c.id}">Remove</button></span></div>`).join('')}<button class="link" data-act="add" style="margin-top:8px">Add another copy</button></div>` : ''}
       <div class="box"><h3>Community</h3><dl class="kv">
         <dt>Have</dt><dd>${num(stats.have)}</dd><dt>Want</dt><dd>${num(stats.want)}</dd>
-        <dt>Rating</dt><dd>${stats.rating ? `<span class="stars">${stars(stats.rating)}</span> ${stats.rating}` : '—'}</dd><dt>Reviews</dt><dd>${stats.votes}</dd></dl></div>
+        <dt>Watched on this disc</dt><dd>${num(stats.watches)}</dd><dt>Rated on this disc</dt><dd>${stats.rating ? `${stars(stats.rating, 'sm')} ${stats.rating}` : '—'}</dd><dt>Film rating</dt><dd>${stats.film_rating ? `${stars(stats.film_rating, 'sm')} ${stats.film_rating}` : '—'}</dd></dl></div>
+      ${fr.own.length || fr.want.length || fr.watched.length ? `<div class="box"><h3>Friends</h3>${fr.own.length ? `<p style="margin:0 0 6px;font-size:13px"><b>Have it:</b> ${fr.own.map((o) => `<a class="link" href="/u/${esc(o.username)}/shelf">${esc(nameOf(o))}</a>`).join(', ')}</p>` : ''}${fr.want.length ? `<p style="margin:0 0 6px;font-size:13px"><b>Want it:</b> ${fr.want.map((o) => `<a class="link" href="/u/${esc(o.username)}/wants">${esc(nameOf(o))}</a>`).join(', ')}</p>` : ''}${fr.watched.length ? `<p style="margin:0;font-size:13px"><b>Watched this disc:</b> ${fr.watched.map((o) => `<a class="link" href="/u/${esc(o.username)}">${esc(nameOf(o))}</a>`).join(', ')}</p>` : ''}</div>` : ''}
       <div class="box"><h3>The record</h3><div style="display:flex;flex-direction:column;gap:8px;align-items:flex-start">
         <a class="link" href="/release/${e.id}/edit">Suggest an edit</a>
         <button class="link" data-act="upload">Upload a photo of the case</button>
@@ -85,45 +88,34 @@ export default async function view(ctx) {
 
       <section class="sec"><div class="hd"><h2>All editions of this film</h2><a class="end mono dim" href="/film/${f.id}">${d.siblings.length} on the register →</a></div>
         <div class="tbl"><table><thead><tr><th>Edition</th><th>Region</th><th>Year</th><th>16:9</th><th class="num">Discs</th><th class="num">Extras</th><th class="num">Have</th></tr></thead><tbody>
-        ${d.siblings.map((s) => `<tr class="click${s.id === e.id ? ' cur' : ''}" data-go="/release/${s.id}" tabindex="0"><td><div class="cellt"><div class="thumb">${cover({ ...s })}</div><div><b>${esc(s.label || 'Unknown label')}</b><span>${esc(s.cat_no)}${s.packaging ? ' · ' + esc(s.packaging) : ''}${s.oop ? ' · <span class="oop">OOP</span>' : ''}</span></div></div></td><td>${regTag(s)}</td><td class="mono">${s.release_year ?? '—'}</td><td>${!wide ? '<span class="no">n/a</span>' : s.anamorphic === 1 ? '<span class="yes">Yes</span>' : s.anamorphic === 0 ? '<span class="no">No</span>' : '<span class="no">?</span>'}</td><td class="num">${s.discs}</td><td class="num">${s.extras_count}${best && s.id === best.id && d.siblings.length > 1 && s.extras_count ? ' ★' : ''}</td><td class="num">${s.have}</td></tr>`).join('')}
+        ${d.siblings.map((s) => `<tr class="click${s.id === e.id ? ' cur' : ''}" data-go="/release/${s.id}" tabindex="0"><td><div class="cellt">${cover(s, 'thumb')}<div><b>${esc(s.label || 'Unknown label')}</b><span>${esc(s.cat_no)}${s.packaging ? ' · ' + esc(s.packaging) : ''}${s.oop ? ' · <span class="oop">OOP</span>' : ''}</span></div></div></td><td>${regTag(s)}</td><td class="mono">${s.release_year ?? '—'}</td><td>${!wide ? '<span class="no">n/a</span>' : s.anamorphic === 1 ? '<span class="yes">Yes</span>' : s.anamorphic === 0 ? '<span class="no">No</span>' : '<span class="no">?</span>'}</td><td class="num">${s.discs}</td><td class="num">${s.extras_count}${best && s.id === best.id && d.siblings.length > 1 && s.extras_count ? ' ★' : ''}</td><td class="num">${s.have}</td></tr>`).join('')}
         </tbody></table></div>
         <p style="margin-top:12px"><a class="link" href="/add?film=${f.id}">Add another edition of this film</a></p></section>
 
-      <section class="sec"><div class="hd"><h2>Reviews</h2><span class="end eyebrow">${d.reviews.length}</span></div>
-        <div id="myreview"></div>
-        ${d.reviews.filter((r) => !me.user || r.username !== me.user.username).map((r) => `<div class="review"><div class="who"><span class="stars">${stars(r.rating)}</span><a href="/u/${esc(r.username)}"><b>${esc(r.username)}</b></a><span class="mono dim">${when(r.updated_at)}</span></div>${r.body ? `<p>${esc(r.body)}</p>` : ''}</div>`).join('') || (me.user ? '' : '<p class="dim">No reviews yet.</p>')}
+      <section class="sec"><div class="hd"><h2>Watched on this disc</h2><span class="end">${d.reviews.length} diary entr${d.reviews.length === 1 ? 'y' : 'ies'}</span></div>
+        ${mine?.watches?.length ? `<div class="mine-box" style="margin:0 0 12px">You’ve watched this disc ${mine.watches.length === 1 ? 'once' : mine.watches.length + ' times'}. ${mine.watches.map((w) => `<button class="link" data-edit-watch="${w.id}">${w.watched_on || 'undated'}${w.rating ? ' · ' + w.rating / 2 + '★' : ''}</button>`).join(', ')}</div>` : ''}
+        ${d.reviews.filter((w) => w.review).length ? `<div class="reviews" id="revs">${d.reviews.filter((w) => w.review).map((w) => reviewCard(w, { showFilm: false })).join('')}</div>` : `<div class="empty" style="padding:24px">No reviews of this edition yet${mine?.copies.length ? '. <button class="link" data-act="log">Log yours</button>' : ''}.</div>`}
+        <p class="dim" style="margin-top:12px;font-size:13px">Reviews of the film from any source are on the <a class="link" href="/film/${f.id}">film page</a>.</p>
       </section>
 
       ${d.lists.length ? `<section class="sec"><div class="hd"><h2>In lists</h2></div><div class="labelgrid">${d.lists.map((l) => `<a href="/list/${l.id}"><b>${esc(l.title)}</b><span class="mono dim">${esc(l.username)}</span></a>`).join('')}</div></section>` : ''}
     </div>
   </div></div>`;
 
-  // My review
-  const mr = $('#myreview', el);
-  if (me.user) {
-    let rating = mine.review?.rating || 0;
-    mr.innerHTML = `<form class="review form" id="rv"><div class="who"><b>Your review</b>${mine.review ? '<button type="button" class="link" data-del-review>Delete</button>' : ''}</div>
-      <div class="ratepick" role="radiogroup" aria-label="Rating">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-r="${n}" aria-label="${n} star${n > 1 ? 's' : ''}" class="${n <= rating ? 'on' : ''}">★</button>`).join('')}</div>
-      <textarea name="body" rows="3" placeholder="Transfer, extras, packaging: what should other collectors know?">${esc(mine.review?.body || '')}</textarea>
-      <div class="err"></div><div><button class="btn sm primary" type="submit">${mine.review ? 'Update review' : 'Post review'}</button></div></form>`;
-    mr.querySelectorAll('[data-r]').forEach((b) => b.onclick = () => { rating = +b.dataset.r; mr.querySelectorAll('[data-r]').forEach((x) => x.classList.toggle('on', +x.dataset.r <= rating)); });
-    bindForm($('#rv', mr), async (v) => {
-      if (!rating) throw new Error('Pick a rating from 1 to 5 stars.');
-      await put(`/api/editions/${e.id}/review`, { rating, body: v.body });
-      toast('Review saved'); rerender();
-    });
-    mr.querySelector('[data-del-review]')?.addEventListener('click', async () => { await del(`/api/editions/${e.id}/review`); toast('Review deleted'); rerender(); });
-  }
+  const revs = $('#revs', el);
+  if (revs) wireReviews(revs, (id) => logSheet({ watch: d.reviews.find((w) => w.id === id), onSaved: rerender }));
 
   el.onclick = async (ev) => {
     const t = ev.target.closest('button, tr[data-go], img[data-zoom]');
-    if (!t) return;
+    if (!t || t.closest('#revs')) return;
+    if (t.dataset.editWatch) return logSheet({ watch: await get(`/api/watches/${t.dataset.editWatch}`).then((r) => r.watch), onSaved: rerender });
     if (t.dataset.go) return go(t.dataset.go);
     if (t.dataset.zoom) return modal(`<img class="full" src="/uploads/${esc(t.dataset.zoom)}" alt="">`, { wide: true });
     const act = t.dataset.act;
     if ((act || t.dataset.editCopy || t.dataset.delCopy || t.dataset.cover || t.dataset.delImg) && !me.user) return needLogin();
     try {
       if (act === 'add') copyModal(card, null, rerender);
+      if (act === 'log') logSheet({ film: { ...f, title: f.title }, copyId: mine.copies[0]?.id, via: 'dvd', onSaved: rerender });
       if (t.dataset.editCopy) copyModal(card, mine.copies.find((c) => c.id === +t.dataset.editCopy), rerender);
       if (t.dataset.delCopy && await confirmDialog('Remove this copy from your shelf?', 'Remove', true)) {
         await del(`/api/copies/${t.dataset.delCopy}`);
@@ -159,7 +151,7 @@ function uploadModal(id, done) {
   });
 }
 
-function listModal(id, lists, done) {
+export function listModal(id, lists, done) {
   modal(`<h2>Add to a list</h2>
     ${lists.length ? `<div class="pick">${lists.map((l) => `<label class="check" style="padding:10px 4px;border-bottom:1px solid var(--line)"><input type="checkbox" data-list="${l.id}" ${l.has ? 'checked' : ''}> ${esc(l.title)}</label>`).join('')}</div>` : '<p class="dim">You have no lists yet.</p>'}
     <form class="form" style="margin-top:18px"><div class="field"><label for="f-nl">New list</label><input id="f-nl" name="title" placeholder="e.g. Best Region 2 Tarkovsky"></div><div class="err"></div><div class="btns"><button class="btn primary" type="submit">Create and add</button></div></form>`, {
@@ -196,5 +188,5 @@ function mergeModal(e, f, go) {
       });
     }
   });
-  void f;
+  void f; void avatar;
 }

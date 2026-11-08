@@ -6,7 +6,7 @@ export default async function ({ el, params, query, go, refreshHeader }) {
   const next = (query.get('next') || '/').startsWith('/') ? query.get('next') || '/' : '/';
   if (me.user) return go(next, { replace: true });
   setTitle(signup ? 'Join' : 'Sign in');
-  el.innerHTML = `<div class="wrap"><div class="authbox"><div class="eyebrow">${signup ? 'Free, and always will be' : 'Welcome back'}</div><h1 class="big">${signup ? 'Join Spine' : 'Sign in'}</h1>
+  el.innerHTML = `<div class="wrap"><div class="authbox"><div class="eyebrow">${signup ? 'Free for collectors' : 'Welcome back'}</div><h1 class="big">${signup ? 'Join Spine' : 'Sign in'}</h1>
     <form class="form" style="margin-top:24px" novalidate>
       ${signup ? field('username', 'Username', { attrs: 'required autocomplete="username" pattern="[A-Za-z0-9_.\\-]{3,24}"', hint: '3 to 24 letters, numbers, dots, dashes or underscores. Shown publicly.' }) + field('email', 'Email', { type: 'email', attrs: 'required autocomplete="email"' })
         : field('login', 'Username or email', { attrs: 'required autocomplete="username"' })}

@@ -3,49 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0e0d0c">
-<title>Spine · The DVD register</title>
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Spine">
+<title>Spine</title>
 <!--meta-->
 <link rel="icon" href="/img/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/img/icon-180.png">
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/app.css">
+<script src="/js/theme.js"></script>
 <script type="module" src="/js/app.js"></script>
 </head>
 <body>
 <a class="skip" href="#app">Skip to content</a>
 <header class="top"><div class="wrap">
-  <a class="logo" href="/"><b>Spine<i>.</i></b><span>The DVD register</span></a>
+  <a class="logo" href="/" aria-label="Spine home"><span class="mark"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="3" width="3.2" height="18" rx="1" fill="#fff"/><rect x="9" y="3" width="4.2" height="18" rx="1" fill="#ff6a4d"/><rect x="15" y="3" width="2.6" height="18" rx="1" fill="#fff"/><rect x="18.4" y="4.5" width="3" height="16.5" rx="1" fill="#9a9aa0" transform="rotate(7 20 12)"/></svg></span><span>Spine</span></a>
   <nav class="main" aria-label="Main">
-    <a href="/browse" data-nav="browse">Browse</a>
-    <a href="/labels" data-nav="labels">Labels</a>
+    <a href="/films" data-nav="films">Films</a>
+    <a href="/browse" data-nav="browse">Editions</a>
+    <a href="/friends" data-nav="friends" data-auth>Friends</a>
+    <a href="/diary" data-nav="diary" data-auth>Diary</a>
+    <a href="/collection" data-nav="collection" data-auth>Shelf</a>
     <a href="/lists" data-nav="lists">Lists</a>
-    <a href="/collection" data-nav="collection" data-auth>Collection</a>
-    <a href="/wantlist" data-nav="wantlist" data-auth>Wantlist</a>
   </nav>
-  <form class="search" id="search" role="search" action="/browse">
+  <form class="search" id="search" role="search" action="/films">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <input id="q" name="q" type="search" placeholder="Title, director, label, barcode…" autocomplete="off" aria-label="Search the register">
+    <input id="q" name="q" type="search" placeholder="Search films, editions, people" autocomplete="off" aria-label="Search">
   </form>
   <div class="userbox" id="userbox"></div>
 </div></header>
 
 <main id="app" tabindex="-1"></main>
 
-<nav class="tabs" aria-label="Main">
-  <a href="/browse" data-nav="browse"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>Browse</a>
-  <a href="/scan" data-nav="scan"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6v12M7 6v12M10 6v12M14 6v12M17 6v12M20 6v12"/></svg>Scan</a>
-  <a href="/collection" data-nav="collection"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 4v16M9 4v16M13 5l4 15M19 4v16"/></svg>Shelf</a>
-  <a href="/wantlist" data-nav="wantlist"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/></svg>Wants</a>
-  <a href="/me" data-nav="me"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>Me</a>
+<nav class="tabs" aria-label="Main" id="tabs">
+  <a href="/" data-nav="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/></svg>Home</a>
+  <a href="/films" data-nav="films"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16M16 4v16"/></svg>Films</a>
+  <a href="/friends" data-nav="friends"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.3-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.7c2.8.2 5 1.9 5.8 5.3"/></svg>Friends</a>
+  <a href="/scan" data-nav="scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 8v8M11 8v8M14 8v8M16.5 8v8"/></svg>Scan</a>
+  <a href="/me" data-nav="me"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>You</a>
 </nav>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div id="modal-root"></div>
 <footer class="foot"><div class="wrap">
-  <span>Spine · a register of DVD editions, built by collectors.</span>
+  <span>Spine · films, the discs they came on, and the people who keep them.</span>
   <a href="/about">About</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/guidelines">Contributor guide</a>
 </div></footer>
 </body>

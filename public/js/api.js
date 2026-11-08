@@ -23,14 +23,12 @@ export const put = (u, b = {}) => api('PUT', u, b);
 export const del = (u, b) => api('DELETE', u, b);
 
 // Signed-in member, unread count, and what they own or want.
-export const me = { user: null, unread: 0, pending: 0, copies: new Set(), wants: new Set() };
+export const me = { user: null, unread: 0, pending: 0, prompts: 0, copies: new Set(), wants: new Set(), watched: new Set(), liked: new Set(), watchlist: new Set(), following: new Set() };
 export async function loadMe() {
   const r = await get('/api/me');
-  me.user = r.user; me.unread = r.unread || 0; me.pending = r.pending || 0;
-  if (me.user) {
-    const ids = await get('/api/me/ids');
-    me.copies = new Set(ids.copies); me.wants = new Set(ids.wants);
-  } else { me.copies = new Set(); me.wants = new Set(); }
+  me.user = r.user; me.unread = r.unread || 0; me.pending = r.pending || 0; me.prompts = r.prompts || 0;
+  const ids = me.user ? await get('/api/me/ids') : {};
+  for (const k of ['copies', 'wants', 'watched', 'liked', 'watchlist', 'following']) me[k] = new Set(ids[k] || []);
   return me;
 }
 export const isMod = () => me.user && (me.user.role === 'mod' || me.user.role === 'admin');

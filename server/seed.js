@@ -98,10 +98,12 @@ tx(db, () => {
     ['Solaris', 0, 'NM', 'NM', 20, '2020'], ['Beau Travail', 0, 'NM', 'NM', 11, '2023-05'], ['The Red Shoes', 1, 'NM', 'NM', 16, '2021-04'],
     ['Happy Together', 1, 'VG+', 'VG', 8, '2019'], ['La Haine', 0, 'NM', 'VG+', 13, '2017'], ['Seven Samurai', 1, 'M', 'NM', 28, '2022-10'],
     ['Taxi Driver', 0, 'VG', 'VG', 3, '2015'], ['Breathless', 1, 'NM', 'NM', 17, '2024-01']];
-  for (const [t, i, dc, cc, price, acq] of own) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond, price, acquired, tags) VALUES (?, ?, ?, ?, ?, ?, ?)').run(admin, e(t, i), dc, cc, price, acq, i === 0 && /Stalker|Solaris/.test(t) ? 'tarkovsky, favourite' : '');
+  let k = 0;
+  const ago = (days) => new Date(Date.now() - days * 864e5).toISOString().slice(0, 19).replace('T', ' ');
+  for (const [t, i, dc, cc, price, acq] of own) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond, price, acquired, tags, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(admin, e(t, i), dc, cc, price, acq, i === 0 && /Stalker|Solaris/.test(t) ? 'tarkovsky, favourite' : '', ago(400 - k++ * 20));
   for (const [t, i] of [['Yi Yi', 0], ['Jeanne Dielman, 23 quai du Commerce, 1080 Bruxelles', 0], ['Close-Up', 0], ['Ugetsu', 1], ['Pather Panchali', 0], ['Eraserhead', 0]]) db.prepare('INSERT INTO wants (user_id, edition_id) VALUES (?, ?)').run(admin, e(t, i));
-  for (const [t, i] of [['Tokyo Story', 0], ['Ugetsu', 0], ['Seven Samurai', 2], ['Stalker', 1], ['Yi Yi', 0]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond) VALUES (?, ?, ?, ?)').run(member, e(t, i), 'NM', 'NM');
-  db.prepare('INSERT INTO wants (user_id, edition_id) VALUES (?, ?)').run(member, e('In the Mood for Love', 0));
+  for (const [t, i] of [['Tokyo Story', 0], ['Ugetsu', 0], ['Seven Samurai', 2], ['Stalker', 1], ['Yi Yi', 0]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond, created_at) VALUES (?, ?, ?, ?, ?)').run(member, e(t, i), 'NM', 'NM', ago(7 + k++ * 9));
+  db.prepare('INSERT INTO wants (user_id, edition_id, created_at) VALUES (?, ?, ?)').run(member, e('In the Mood for Love', 0), ago(3));
 
   // Diaries. Ratings are half-stars (1–10). via 'dvd' entries point at the copy they were watched on.
   const fid = (t) => db.prepare('SELECT film_id FROM editions WHERE id = ?').get(e(t)).film_id;
@@ -111,7 +113,7 @@ tx(db, () => {
     const date = on || new Date(Date.now() - daysAgo * 864e5).toISOString().slice(0, 10);
     db.prepare(`INSERT INTO watches (user_id, film_id, watched_on, via, edition_id, copy_id, rewatch, rating, liked, review, source, prompt_state, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(u, fid(t), date, via, c ? e(t, i) : (via === 'dvd' ? e(t, i) : null), c ? c.id : null, rewatch, rating, liked, review, source, prompt, date + ' 21:30:00', date + ' 21:30:00');
-    if (liked) db.prepare('INSERT OR IGNORE INTO likes (user_id, film_id) VALUES (?, ?)').run(u, fid(t));
+    if (liked) db.prepare('INSERT OR IGNORE INTO likes (user_id, film_id, created_at) VALUES (?, ?, ?)').run(u, fid(t), date + ' 21:31:00');
   };
   log(admin, 'Stalker', { daysAgo: 3, rating: 10, liked: 1, review: 'The transfer finally keeps the sepia sections warm instead of green. Watched on the Halide two-disc, and the cinematographer interview alone is worth the price. The Zone has never looked more like a place you could walk into.' });
   log(admin, 'In the Mood for Love', { daysAgo: 9, rating: 9, liked: 1, review: 'Lovely colour on this disc. The deleted scenes are the reason to own the Halide edition; the Obsidian one is softer but has the better cover.' });
@@ -138,7 +140,7 @@ tx(db, () => {
   log(member, 'In the Mood for Love', { daysAgo: 48, via: 'mubi', rating: 9, liked: 1 });
   log(member, 'Persona', { daysAgo: 60, via: 'cinema', rating: 8, review: 'Saw it at the BFI on a 35mm print. The film burning through the gate got a gasp.' });
 
-  for (const [t, i] of [['Breathless', 0], ['Cléo from 5 to 7', 1], ['La Haine', 0], ['Beau Travail', 0], ['8½', 1]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond) VALUES (?, ?, ?, ?)').run(nour, e(t, i), 'NM', 'VG+');
+  for (const [t, i] of [['Breathless', 0], ['Cléo from 5 to 7', 1], ['La Haine', 0], ['Beau Travail', 0], ['8½', 1]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond, created_at) VALUES (?, ?, ?, ?, ?)').run(nour, e(t, i), 'NM', 'VG+', ago(2 + k++ * 11));
   log(nour, 'Breathless', { daysAgo: 4, rating: 9, liked: 1, review: 'Still the most alive film ever made. The Lumière disc is bare but the transfer is honest.' });
   log(nour, 'Cléo from 5 to 7', { i: 1, daysAgo: 11, rating: 10, liked: 1 });
   log(nour, 'Beau Travail', { daysAgo: 18, rating: 9, review: 'That last scene.' });
@@ -146,7 +148,7 @@ tx(db, () => {
   log(nour, 'Stalker', { daysAgo: 45, via: 'prime', rating: 7, review: 'I think I need to see this properly, on a disc, in the dark.' });
   log(nour, 'Mulholland Drive', { daysAgo: 80, via: 'netflix', rating: 9, liked: 1 });
 
-  for (const [t, i] of [['Mulholland Drive', 0], ['Eraserhead', 0], ['Taxi Driver', 0], ['Paris, Texas', 1], ['The Third Man', 0]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond) VALUES (?, ?, ?, ?)').run(tomas, e(t, i), 'VG+', 'VG');
+  for (const [t, i] of [['Mulholland Drive', 0], ['Eraserhead', 0], ['Taxi Driver', 0], ['Paris, Texas', 1], ['The Third Man', 0]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond, created_at) VALUES (?, ?, ?, ?, ?)').run(tomas, e(t, i), 'VG+', 'VG', ago(1 + k++ * 13));
   log(tomas, 'Mulholland Drive', { daysAgo: 1, rating: 10, liked: 1, rewatch: 1, review: 'The Meridian snapper case has survived four house moves. Silencio.' });
   log(tomas, 'Eraserhead', { daysAgo: 8, rating: 8, review: 'Mono track on this disc is the right call.' });
   log(tomas, 'Taxi Driver', { daysAgo: 15, rating: 9 });
@@ -155,9 +157,9 @@ tx(db, () => {
   log(tomas, 'The Third Man', { daysAgo: 65, rating: 9 });
 
   // Who follows whom, watchlists, favourites.
-  const follow = (a, b) => db.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)').run(a, b);
+  const follow = (a, b) => db.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id, created_at) VALUES (?, ?, ?)').run(a, b, ago(30 + k++ * 5));
   follow(admin, member); follow(admin, nour); follow(admin, tomas); follow(member, admin); follow(nour, admin); follow(nour, member); follow(tomas, admin); follow(tomas, nour);
-  const wl = (u, t) => db.prepare('INSERT OR IGNORE INTO watchlist (user_id, film_id) VALUES (?, ?)').run(u, fid(t));
+  const wl = (u, t) => db.prepare('INSERT OR IGNORE INTO watchlist (user_id, film_id, created_at) VALUES (?, ?, ?)').run(u, fid(t), ago(k++ * 4));
   wl(admin, 'Jeanne Dielman, 23 quai du Commerce, 1080 Bruxelles'); wl(admin, 'Close-Up'); wl(admin, 'Pather Panchali'); wl(admin, 'Beau Travail');
   wl(member, 'Eraserhead'); wl(member, 'Taxi Driver'); wl(nour, 'Tokyo Story'); wl(nour, 'Yi Yi'); wl(tomas, 'Stalker'); wl(tomas, 'In the Mood for Love');
   const favs = (u, ...ts) => db.prepare('UPDATE users SET favourites = ? WHERE id = ?').run(JSON.stringify(ts.map(fid)), u);

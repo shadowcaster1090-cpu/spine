@@ -99,8 +99,16 @@ export default function (r, { db, fail }) {
       edition: x.edition_id ? editions[x.edition_id] : undefined,
       list: x.list_id ? lists[x.list_id] : undefined,
       other: x.other_id ? users[x.other_id] : undefined
-    })).filter((x) => x.user && (x.type !== 'watch' || x.watch) && (!x.edition_id || x.edition));
-    return { items, next: rows.length === 40 ? rows[rows.length - 1].at : null };
+    })).filter((x) => x.user && (x.type !== 'watch' || x.watch) && (x.type === 'watch' || x.type === 'follow' || x.type === 'list' || x.film || x.edition));
+    // A member who adds ten discs in an evening gets one feed item, not ten.
+    const grouped = [];
+    for (const it of items) {
+      const prev = grouped[grouped.length - 1];
+      if (prev && prev.type === it.type && ['copy', 'want', 'watchlist', 'like'].includes(it.type) && prev.user.id === it.user.id && Date.parse(prev.at.replace(' ', 'T') + 'Z') - Date.parse(it.at.replace(' ', 'T') + 'Z') < 6 * 3600e3) {
+        (prev.more ||= []).push(it.edition || it.film);
+      } else grouped.push(it);
+    }
+    return { items: grouped, next: rows.length === 40 ? rows[rows.length - 1].at : null };
   });
 
   /* what friends think of a film or own of it */
