@@ -96,6 +96,9 @@ export function cleanLabel(input, partial = false) {
   return l;
 }
 
+// UPC-A (12 digits) and the same code written as EAN-13 with a leading zero are one barcode.
+export const barcodeAlt = (c) => (c.length === 12 ? '0' + c : c.length === 13 && c.startsWith('0') ? c.slice(1) : c);
+
 /* ---------- palette for generated covers ---------- */
 export function paletteFor(seed) {
   let h = 2166136261;
@@ -314,7 +317,7 @@ export function validateSubmission(kind, targetId, payload, db) {
     if (!e.label_name) fail(400, 'Which label released this edition?');
     if (!e.region) fail(400, 'Add the region printed on the case (0 for region-free).');
     if (e.barcode) {
-      const dupe = db.prepare('SELECT id FROM editions WHERE barcode = ? AND merged_into IS NULL').get(e.barcode);
+      const dupe = db.prepare('SELECT id FROM editions WHERE barcode IN (?, ?) AND merged_into IS NULL').get(e.barcode, barcodeAlt(e.barcode));
       if (dupe) fail(409, `An edition with barcode ${e.barcode} is already on the register (#${dupe.id}).`);
     }
     return;
@@ -342,6 +345,11 @@ export function applySubmission(db, sub, actorId) {
     const id = Number(lastInsertRowid);
     reindex(db, id);
     revision(db, 'edition', id, by, sub.id, 'Added to the register', {}, { ...e, film_id: film.id });
+    // The contributor said they own it (often straight from a scan): put it on their shelf.
+    if (payload.add_to_shelf && by && db.prepare('SELECT 1 FROM users WHERE id = ?').get(by)) {
+      db.prepare('INSERT INTO copies (user_id, edition_id) VALUES (?, ?)').run(by, id);
+      db.prepare('DELETE FROM wants WHERE user_id = ? AND edition_id = ?').run(by, id);
+    }
     // Tell people who own or want another edition of this film.
     const title = db.prepare('SELECT title FROM films WHERE id = ?').get(film.id).title;
     const fans = db.prepare(`SELECT DISTINCT user_id FROM (

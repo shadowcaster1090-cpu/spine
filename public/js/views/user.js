@@ -15,7 +15,7 @@ export default async function view(ctx) {
     <div class="profile"><div class="avatar">${esc(u.username[0])}</div>
       <div style="flex:1;min-width:220px"><div class="eyebrow">${u.role !== 'member' ? esc(u.role) + ' · ' : ''}Member since ${new Date(u.created_at.replace(' ', 'T') + 'Z').getFullYear()}${p.stats.contributions ? ` · ${p.stats.contributions} contributions` : ''}</div>
         <h1 class="big">${esc(u.username)}</h1>${u.bio ? `<p class="dim" style="margin-top:10px;max-width:60ch">${esc(u.bio)}</p>` : ''}</div>
-      ${own ? `<div class="btns"><button class="btn sm" data-act="import">Import CSV</button><a class="btn sm" href="/api/collection/export.csv" download>Export CSV</a><a class="btn sm ghost" href="/settings">Settings</a></div>` : ''}
+      ${own ? `<div class="btns"><a class="btn sm primary" href="/scan">Scan discs</a><button class="btn sm" data-act="import">Import CSV</button><a class="btn sm" href="/api/collection/export.csv" download>Export CSV</a><a class="btn sm ghost" href="/settings">Settings</a></div>` : ''}
     </div>
     <nav class="tabsbar">
       <a href="${base}" class="${tab === 'shelf' ? 'on' : ''}">Shelf · ${num(p.stats.copies)}</a>
@@ -55,7 +55,7 @@ async function shelf(box, u, own, rerender) {
     const oldest = list.reduce((a, i) => (!a || (i.edition.year && i.edition.year < a.edition.year) ? i : a), null);
     const perRow = Math.max(12, Math.ceil(list.length / Math.ceil(list.length / 22)));
     const rows = []; for (let i = 0; i < list.length; i += perRow) rows.push(list.slice(i, i + perRow));
-    const body = !list.length ? (items.length ? '<div class="empty">Nothing matches that filter.</div>' : `<div class="empty">${own ? 'Your shelf is empty. <a href="/add">Scan a barcode</a> or <a href="/browse">browse the register</a> to add your first disc.' : 'Nothing on this shelf yet.'}</div>`)
+    const body = !list.length ? (items.length ? '<div class="empty">Nothing matches that filter.</div>' : `<div class="empty">${own ? 'Your shelf is empty. <a href="/scan">Scan the barcodes</a> on your discs or <a href="/browse">browse the register</a> to add your first disc.' : 'Nothing on this shelf yet.'}</div>`)
       : mode === 'spines' ? `<div class="shelf">${rows.map((r) => `<div class="shelfrow">${r.map((i) => spineEl(i.edition)).join('')}</div>`).join('')}</div>`
       : mode === 'covers' ? `<div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">${list.map((i) => card(i.edition)).join('')}</div>`
       : `<div class="tbl"><table><thead><tr><th>Edition</th><th>Region</th><th>Disc</th><th>Case</th>${own ? '<th class="num">Paid</th>' : ''}<th>Acquired</th><th>Tags</th>${own ? '<th></th>' : ''}</tr></thead><tbody>${list.map((i) => `<tr><td><a class="cellt" href="/release/${i.edition.id}"><div class="thumb">${cover(i.edition)}</div><div><b>${esc(i.edition.title)}</b><span>${esc(i.edition.label || '')} ${esc(i.edition.cat_no)}</span></div></a></td><td>${regTag(i.edition)}</td><td>${condTag(i.copy.disc_cond)}</td><td>${condTag(i.copy.case_cond)}</td>${own ? `<td class="num">${money(i.copy.price)}</td>` : ''}<td class="mono">${esc(i.copy.acquired)}</td><td>${i.copy.tags.split(',').filter((t) => t.trim()).map((t) => `<span class="tag">${esc(t.trim())}</span>`).join(' ')}</td>${own ? `<td class="num"><button class="link" data-edit="${i.copy.id}">Edit</button></td>` : ''}</tr>`).join('')}</tbody></table></div>`;

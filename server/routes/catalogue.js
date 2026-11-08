@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { searchEditions, getEdition, getFilmRow, cards, mergeEditions } from '../catalogue.js';
+import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt } from '../catalogue.js';
 import { requireUser, requireMod, isMod } from '../auth.js';
 
 const MAGIC = [
@@ -39,12 +39,14 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
     return { revisions: rows.map((x) => ({ ...x, before: JSON.parse(x.before), after: JSON.parse(x.after) })) };
   });
 
-  r.get('/api/barcode/:code', ({ params }) => {
+  r.get('/api/barcode/:code', ({ params, user }) => {
     const code = params.code.replace(/\D/g, '');
     if (code.length < 8) fail(400, 'A barcode is 8 to 14 digits.');
     // UPC-A (12) and EAN-13 with a leading zero are the same code.
-    const alt = code.length === 12 ? '0' + code : code.length === 13 && code.startsWith('0') ? code.slice(1) : code;
-    return { code, items: cards(db, 'e.barcode IN (?, ?)', [code, alt], 'e.id', 20) };
+    const alt = barcodeAlt(code);
+    // Also report a pending submission with this barcode, so scanners don't add the same disc twice.
+    const pending = db.prepare("SELECT id, user_id FROM submissions WHERE status = 'pending' AND kind = 'edition' AND json_extract(payload, '$.barcode') IN (?, ?) ORDER BY id LIMIT 1").get(code, alt);
+    return { code, items: cards(db, 'e.barcode IN (?, ?)', [code, alt], 'e.id', 20), pending: pending ? { id: pending.id, mine: !!user && pending.user_id === user.id } : null };
   });
 
   r.get('/api/films', ({ query }) => {

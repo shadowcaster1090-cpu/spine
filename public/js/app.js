@@ -20,6 +20,7 @@ const ROUTES = [
   [/^\/lists$/, 'lists'],
   [/^\/list\/(\d+)$/, 'list', ['id']],
   [/^\/add$/, 'add'],
+  [/^\/scan$/, 'scan'],
   [/^\/contributions$/, 'contributions'],
   [/^\/mod(?:\/(queue|reviewed|members))?$/, 'mod', ['tab']],
   [/^\/notifications$/, 'notifications'],
@@ -27,7 +28,7 @@ const ROUTES = [
   [/^\/(login|signup)$/, 'auth', ['mode']],
   [/^\/(about|privacy|terms|guidelines)$/, 'pages', ['page']]
 ];
-const NAV = { browse: 'browse', release: 'browse', film: 'browse', person: 'browse', labels: 'labels', label: 'labels', lists: 'lists', list: 'lists', add: 'add' };
+const NAV = { browse: 'browse', release: 'browse', film: 'browse', person: 'browse', labels: 'labels', label: 'labels', lists: 'lists', list: 'lists', add: 'scan', scan: 'scan' };
 
 const main = $('#app');
 let cleanup = null, seq = 0;
@@ -80,11 +81,11 @@ export function refreshHeader() {
   }
   const u = me.user;
   box.innerHTML = `
-    <a class="btn sm hide-m" href="/add">+ Add</a>
+    <a class="btn sm hide-m" href="/scan">Scan</a><a class="btn sm hide-m ghost" href="/add">+ Add</a>
     <a class="iconbtn" href="/notifications" aria-label="Notifications${me.unread ? `, ${me.unread} unread` : ''}"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 16V11a6 6 0 1 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>${me.unread ? `<span class="dot">${me.unread > 99 ? '99+' : me.unread}</span>` : ''}</a>
     <div class="menu" id="umenu"><button class="avatar" aria-haspopup="true" aria-expanded="false" title="${esc(u.username)}">${esc(u.username[0])}</button>
       <div class="menu-pop" role="menu">
-        <a href="/u/${esc(u.username)}">Profile</a><a href="/collection">Collection</a><a href="/wantlist">Wantlist</a><a href="/u/${esc(u.username)}/lists">My lists</a>
+        <a href="/u/${esc(u.username)}">Profile</a><a href="/scan">Scan discs</a><a href="/collection">Collection</a><a href="/wantlist">Wantlist</a><a href="/u/${esc(u.username)}/lists">My lists</a>
         <a href="/contributions">My contributions</a>
         ${isMod() ? `<a href="/mod">Moderation ${me.pending ? `<span class="mono" style="color:var(--lamp)">${me.pending}</span>` : ''}</a>` : ''}
         <hr><a href="/settings">Settings</a><button data-logout>Sign out</button>

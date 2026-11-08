@@ -2,12 +2,12 @@ import { get, post, me } from '../api.js';
 import { esc, card, bindForm, setTitle, toast, $ } from '../ui.js';
 import { editionFields, readEdition, filmFields, readFilm, loadLabels, copyModal } from '../forms.js';
 import { submitted } from './shared-submitted.js';
-
-const ZXING = 'https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js';
+import { startScanner, decodeFile, normalise, unlockFeedback } from '../scan.js';
 
 export default async function ({ el, query, go, needLogin }) {
   if (!me.user) return needLogin();
   setTitle('Add an edition');
+  const own = query.get('own') !== '0', back = query.get('back') === 'scan' ? '/scan' : null;
   const state = { barcode: query.get('barcode') || '', film: null, newFilm: null, label: query.get('label') || '', spine: query.get('spine') || '' };
   let stopScan = null;
   const stop = () => { if (stopScan) { stopScan(); stopScan = null; } };
@@ -24,24 +24,35 @@ export default async function ({ el, query, go, needLogin }) {
   function scanStep() {
     frame('scan', `<div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:32px" class="addgrid">
       <div><div class="scanner" id="scanner"><video id="video" playsinline muted></video><div class="aim"></div></div>
-        <div class="btns" style="margin-top:12px"><button class="btn primary" id="cam">Start camera</button><span class="dim" id="camnote" style="font-size:13px"></span></div></div>
+        <div class="btns" style="margin-top:12px"><button class="btn primary" id="cam">Start camera</button><label class="btn" for="photo">Use a photo</label><input id="photo" type="file" accept="image/*" capture="environment" hidden><span class="dim" id="camnote" style="font-size:13px"></span></div>
+        <p class="dim" style="margin-top:10px;font-size:13px">Adding a stack of discs you own? <a class="link" href="/scan">Scan to shelf</a> adds them one after another.</p></div>
       <div><form class="form" id="manual"><div class="field"><label for="f-code">Or type the barcode</label><input id="f-code" name="code" inputmode="numeric" autocomplete="off" value="${esc(state.barcode)}" placeholder="e.g. 5022089123457"><small>The 8 to 14 digits under the bars on the back of the case.</small></div><div class="err"></div>
         <div class="btns"><button class="btn primary" type="submit">Look it up</button><button class="btn ghost" type="button" id="skip">No barcode</button></div></form>
         <div id="found" style="margin-top:24px"></div></div></div>`);
     const video = $('#video', el), note = $('#camnote', el);
     $('#cam', el).onclick = async () => {
       note.textContent = 'Starting camera…';
-      try { stopScan = await startScanner(video, (code) => { stop(); $('#f-code', el).value = code; lookup(code); }); note.textContent = 'Hold the barcode inside the red box.'; }
+      unlockFeedback();
+      try { const sc = await startScanner(video, (code) => { stopScan = null; $('#f-code', el).value = code; lookup(code).catch((e) => toast(e.message, true)); }); stopScan = sc.stop; note.textContent = 'Hold the barcode inside the red box.'; }
       catch (e) { note.textContent = e.message; }
+    };
+    $('#photo', el).onchange = async (ev) => {
+      const f = ev.target.files[0]; ev.target.value = '';
+      if (!f) return;
+      note.textContent = 'Reading the photo…';
+      const code = await decodeFile(f).catch(() => null);
+      note.textContent = code ? '' : 'No barcode found in that photo. Type the numbers instead.';
+      if (code) { $('#f-code', el).value = code; lookup(code).catch((e) => toast(e.message, true)); }
     };
     $('#skip', el).onclick = () => { state.barcode = ''; filmStep(); };
     bindForm($('#manual', el), async (v) => lookup(v.code));
-    if (state.barcode) lookup(state.barcode);
+    if (state.barcode) lookup(state.barcode).catch((e) => toast(e.message, true));
   }
 
   async function lookup(raw) {
-    const code = String(raw).replace(/\D/g, '');
-    if (code.length < 8 || code.length > 14) throw Object.assign(new Error('A barcode is 8 to 14 digits.'), {});
+    const digits = String(raw).replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 14) throw new Error('A barcode is 8 to 14 digits.');
+    const code = normalise(digits) || digits;
     state.barcode = code;
     const r = await get(`/api/barcode/${code}`);
     const box = $('#found', el);
@@ -98,7 +109,7 @@ export default async function ({ el, query, go, needLogin }) {
       ${f ? `<div class="panel" style="display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap"><div><div class="eyebrow">Film</div><div style="font-family:var(--display);font-size:28px;font-style:italic">${esc(f.title)}</div><div class="dim">${f.directors.map((d) => esc(d.name)).join(', ')}${f.year ? ' · ' + f.year : ''}</div></div><button class="btn sm ghost" type="button" id="chfilm">Change film</button></div>`
         : `<div class="panel"><div class="eyebrow" style="margin-bottom:14px">New film${state.newFilm?.tmdb_id ? ' · details from TMDB, check them' : ''}</div><div class="form cols">${filmFields(state.newFilm || {})}</div></div>`}
       <div class="panel"><div class="eyebrow" style="margin-bottom:14px">This edition · copy what is printed on the case</div><div class="form cols">${editionFields({ barcode: state.barcode, label_name: state.label, spine_no: state.spine, discs: 1 }, labels)}</div></div>
-      <label class="check"><input type="checkbox" name="own" value="1" checked> I own this edition: add it to my shelf once it is on the register</label>
+      <label class="check"><input type="checkbox" name="own" value="1" ${own ? 'checked' : ''}> I own this edition: put it on my shelf ${me.user.role === 'member' ? 'once a moderator approves it' : ''}</label>
       <div class="err"></div>
       <div class="btns"><button class="btn primary" type="submit">${me.user.role === 'member' ? 'Submit for review' : 'Add to the register'}</button><button class="btn ghost" type="button" id="back">Back</button></div></form>`);
     $('#chfilm', el)?.addEventListener('click', filmStep);
@@ -109,9 +120,10 @@ export default async function ({ el, query, go, needLogin }) {
       else payload.film = { ...readFilm(v), tmdb_id: state.newFilm?.tmdb_id || null };
       if (!payload.label_name) throw new Error('Which label released this edition?');
       if (!payload.region) throw new Error('Add the region printed on the case (0 for region-free).');
+      payload.add_to_shelf = !!v.own;
       const r = await post('/api/submissions', { kind: 'edition', payload });
-      if (r.status === 'approved' && v.own) { await post('/api/copies', { edition_id: r.result_id }); me.copies.add(r.result_id); }
-      submitted(el, r, r.result_id ? `/release/${r.result_id}` : '/contributions', go);
+      if (r.status === 'approved' && v.own) { me.copies.add(r.result_id); me.wants.delete(r.result_id); }
+      submitted(el, r, back || (r.result_id ? `/release/${r.result_id}` : '/contributions'), go, back ? 'Back to scanning' : 'Back');
     });
   }
 
@@ -122,35 +134,4 @@ export default async function ({ el, query, go, needLogin }) {
     filmStep();
   } else scanStep();
   return stop;
-}
-
-/* Camera barcode scanning: the browser's BarcodeDetector where available, ZXing otherwise. */
-async function startScanner(video, onCode) {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser can’t use the camera here. Type the barcode instead.');
-  if ('BarcodeDetector' in window) {
-    const formats = await BarcodeDetector.getSupportedFormats?.() || [];
-    if (['ean_13', 'upc_a'].some((f) => formats.includes(f))) {
-      const det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'].filter((f) => formats.includes(f)) });
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).catch(() => { throw new Error('Camera permission was refused. Type the barcode instead.'); });
-      video.srcObject = stream; await video.play();
-      let alive = true;
-      const tick = async () => {
-        if (!alive) return;
-        try { const r = await det.detect(video); if (r[0]?.rawValue) { onCode(r[0].rawValue); return; } } catch { /* frame not ready */ }
-        setTimeout(tick, 200);
-      };
-      tick();
-      return () => { alive = false; stream.getTracks().forEach((t) => t.stop()); video.srcObject = null; };
-    }
-  }
-  if (!window.ZXing) {
-    await new Promise((res, rej) => { const s = document.createElement('script'); s.src = ZXING; s.onload = res; s.onerror = () => rej(new Error('Could not load the barcode reader. Type the barcode instead.')); document.head.append(s); });
-  }
-  const hints = new Map([[window.ZXing.DecodeHintType.POSSIBLE_FORMATS, [window.ZXing.BarcodeFormat.EAN_13, window.ZXing.BarcodeFormat.EAN_8, window.ZXing.BarcodeFormat.UPC_A, window.ZXing.BarcodeFormat.UPC_E]]]);
-  const reader = new window.ZXing.BrowserMultiFormatReader(hints);
-  let done = false;
-  await reader.decodeFromConstraints({ video: { facingMode: 'environment' } }, video, (result) => {
-    if (result && !done) { done = true; onCode(result.getText()); }
-  }).catch(() => { throw new Error('Camera permission was refused. Type the barcode instead.'); });
-  return () => reader.reset();
 }

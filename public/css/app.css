@@ -15,6 +15,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box }
+[hidden] { display: none !important }
 html, body { margin: 0; background: var(--ink); color: var(--paper); font-family: var(--body); font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased }
 body { min-height: 100vh; display: flex; flex-direction: column }
 body::before { content: ""; position: fixed; inset: 0; z-index: 100; pointer-events: none; background-image: url(/img/grain.svg); opacity: .05 }
@@ -342,3 +343,20 @@ td.num, th.num { text-align: right; font-family: var(--mono) }
 }
 .run .cv { width: 30px }
 @media (max-width:720px){.addgrid{grid-template-columns:1fr!important}}
+
+/* scan to shelf */
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0) }
+.scanlayout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 36px; padding-bottom: 60px }
+.scanlayout .scanner { max-width: none }
+.scanidle { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; align-items: center; justify-content: center; text-align: center; padding: 24px; background: radial-gradient(circle at 50% 45%, #1d1b18, #0b0a09); color: var(--dim); font-size: 13px }
+.scanidle[hidden] { display: none }
+.scanflash { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 10px 14px; border-radius: 10px; background: var(--ok); color: #0b1406; font-weight: 600; font-size: 14px; opacity: 0; transform: translateY(8px); transition: all .2s; pointer-events: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.scanflash.show { opacity: 1; transform: none }
+.scanflash.warn { background: var(--warn); color: #1a1003 }
+.scanrow { grid-template-columns: 48px minmax(0, 1fr) auto }
+.scanrow .t { font-size: 21px }
+@media (max-width: 860px) {
+  .scanlayout { grid-template-columns: 1fr; gap: 20px }
+  .scanrow { grid-template-columns: 44px minmax(0, 1fr) }
+  .scanrow .act { grid-column: 2 }
+}

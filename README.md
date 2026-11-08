@@ -7,6 +7,7 @@ Spine treats the **edition** as the thing you collect: the label, spine number, 
 ## What's in it
 
 - **Catalogue:** films, editions, labels and directors. Search tolerates typos and also finds editions by barcode (UPC/EAN).
+- **Scan to shelf:** point your phone at the barcode on the back of a DVD and it goes straight onto your shelf, or your wantlist. The camera keeps scanning, so you can work through a whole stack. Each scan can be undone or graded. Duplicates, discs that share a barcode, and barcodes Spine doesn't know yet are all handled. An unknown disc hands off to "add an edition" with the barcode already filled in, and lands on your shelf once it's approved.
 - **Adding editions:** scan a barcode with the phone camera or type it. Spine checks whether the edition already exists, then lets you pick the film (from the register or from TMDB) and enter the details printed on the case.
 - **Moderation:** new members' additions and edits wait in a queue. After 10 approved contributions a member's edits go live straight away. Every change is stored with a before/after diff. Moderators can merge duplicate editions, which moves everyone's copies, wants, reviews, lists and photos.
 - **Collection:** each copy you own has its own disc and case grade, price paid, date, tags and notes. View it as a shelf of spines, as covers, or as a table, with breakdowns by region, decade, label and condition. You can import and export it as CSV.
@@ -78,4 +79,4 @@ Every catalogue change goes through `submissions`. Trusted members' submissions 
 - Have the privacy policy and terms (`public/js/views/pages.js`) reviewed for your jurisdiction.
 - Add email delivery (password reset, notification digests). Spine has in-app notifications only, and no password reset by email yet.
 - Consider an object store (S3 or R2) for `uploads/` if photos grow large, and a CDN in front.
-- The camera scanner uses the browser's BarcodeDetector where it exists (Chrome on Android). Elsewhere, including iPhone Safari, it falls back to ZXing loaded from unpkg. Typing the barcode always works.
+- Barcode scanning works in every browser. It uses the browser's own BarcodeDetector where available (Chrome on Android), then ZXing from unpkg, then Spine's built-in EAN-13/UPC-A/EAN-8 decoder (`public/js/scan.js`), which needs no network. Members can also take a photo of the barcode or type it. The live camera needs HTTPS (or localhost).

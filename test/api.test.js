@@ -76,6 +76,26 @@ test('member submissions wait for moderation, then notify', async () => {
   assert.match(r.data.items[0].text, /approved/);
 });
 
+test('a scanned unknown disc goes on the shelf once approved', async () => {
+  const filmId = (await anon('GET', `/api/editions/${editionId}`)).data.film.id;
+  let r = await member('POST', '/api/submissions', { kind: 'edition', payload: { film_id: filmId, label_name: 'Silver Salt', cat_no: 'SSA-1', region: '2', standard: 'PAL', barcode: '5012345678900', add_to_shelf: true } });
+  assert.equal(r.data.status, 'pending');
+  r = await member('GET', '/api/barcode/5012345678900');
+  assert.equal(r.data.items.length, 0);
+  assert.equal(r.data.pending.mine, true, 'scanner learns it is already waiting for review');
+  r = await admin('POST', `/api/submissions/${(await admin('GET', '/api/submissions')).data.items.at(-1).id}/approve`, {});
+  const id = r.data.result_id;
+  r = await member('GET', '/api/me/ids');
+  assert.ok(r.data.copies.includes(id));
+  r = await member('GET', '/api/notifications');
+  assert.match(r.data.items[0].text, /added to your shelf/);
+  // UPC-A and its EAN-13 form are the same disc
+  r = await anon('GET', '/api/barcode/0715515012345');
+  assert.equal(r.data.items[0]?.id, editionId);
+  r = await member('POST', '/api/submissions', { kind: 'edition', payload: { film_id: filmId, label_name: 'X', region: '1', barcode: '0715515012345' } });
+  assert.equal(r.status, 409);
+});
+
 test('bad input is refused with a readable message', async () => {
   let r = await admin('POST', '/api/submissions', { kind: 'edition', payload: { film, label_name: 'X', region: '9' } });
   assert.equal(r.status, 400);
@@ -110,7 +130,7 @@ test('collection, wants, CSV round trip and privacy', async () => {
   r = await anon('GET', '/api/users/ben/collection');
   assert.equal(r.status, 403);
   r = await member('GET', '/api/users/ben/collection');
-  assert.equal(r.data.items.length, 1);
+  assert.equal(r.data.items.length, 2, 'scanned disc plus the one added by hand');
 });
 
 test('reviews and lists', async () => {

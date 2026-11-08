@@ -77,7 +77,8 @@ export default function (r, { db, fail, rateLimit }) {
       const id = applySubmission(db, s, user.id);
       db.prepare("UPDATE submissions SET status = 'approved', reviewer_id = ?, note = ?, result_id = ?, reviewed_at = datetime('now') WHERE id = ?").run(user.id, note, id, s.id);
       const link = s.kind === 'film_edit' ? `/film/${id}` : s.kind === 'label_edit' ? `/label/${id}` : `/release/${id}`;
-      if (s.user_id && s.user_id !== user.id) notify(db, s.user_id, `Your ${s.kind === 'edition' ? 'new edition' : 'edit'} was approved.${note ? ' Note: ' + note : ''}`, link);
+      const shelved = s.kind === 'edition' && JSON.parse(s.payload).add_to_shelf;
+      if (s.user_id && s.user_id !== user.id) notify(db, s.user_id, `Your ${s.kind === 'edition' ? 'new edition' : 'edit'} was approved${shelved ? ' and added to your shelf' : ''}.${note ? ' Note: ' + note : ''}`, link);
       return id;
     });
     return { ok: true, result_id: resultId };
