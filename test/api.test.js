@@ -126,19 +126,106 @@ test('collection, wants, CSV round trip and privacy', async () => {
   r = await admin('POST', '/api/collection/import', { csv: 'barcode,label,cat_no,disc_condition,price_paid\n715515012345,,,NM,9\n,Nitrate Archive,NIT-008,VG,\n000000000000,,,,' });
   assert.equal(r.data.added, 2);
   assert.equal(r.data.unmatched.length, 1);
-  await member('PATCH', '/api/me', { public_collection: false });
+  await member('PATCH', '/api/me', { public_collection: false, public_diary: false });
   r = await anon('GET', '/api/users/ben/collection');
   assert.equal(r.status, 403);
+  r = await anon('GET', '/api/users/ben/diary');
+  assert.equal(r.status, 403);
+  await member('PATCH', '/api/me', { public_diary: true });
   r = await member('GET', '/api/users/ben/collection');
   assert.equal(r.data.items.length, 2, 'scanned disc plus the one added by hand');
 });
 
-test('reviews and lists', async () => {
-  let r = await member('PUT', `/api/editions/${editionId}/review`, { rating: 5, body: 'Superb.' });
-  assert.equal(r.status, 200);
+test('diary: log a watch on your own DVD, review it, friends see it', async () => {
+  const filmId = (await anon('GET', `/api/editions/${editionId}`)).data.film.id;
+  const copy = (await member('GET', '/api/users/ben/collection')).data.items.find((i) => i.edition.id === editionId).copy;
+  let r = await member('POST', '/api/watches', { film_id: filmId, watched_on: '2026-11-01', copy_id: copy.id, rating: 9, liked: true, review: 'Superb on this disc.' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.watch.via, 'dvd');
+  assert.equal(r.data.watch.edition.id, editionId);
+  const watchId = r.data.watch.id;
+  r = await member('POST', '/api/watches', { film_id: filmId, watched_on: '2026-11-03', via: 'netflix', rating: 11 });
+  assert.equal(r.status, 400);
   r = await anon('GET', `/api/editions/${editionId}`);
-  assert.equal(r.data.stats.rating, 5);
-  r = await member('POST', '/api/lists', { title: 'Tarkovsky on disc', edition_id: editionId });
+  assert.equal(r.data.stats.rating, 4.5, 'edition rating from watches on this disc, in stars');
+  assert.equal(r.data.reviews[0].review, 'Superb on this disc.');
+  r = await anon('GET', `/api/films/${filmId}`);
+  assert.equal(r.data.stats.likes, 1);
+  // ada follows ben and sees the review in her feed and on the film page
+  r = await admin('POST', '/api/users/ben/follow');
+  assert.equal(r.data.following, true);
+  r = await admin('GET', `/api/films/${filmId}/friends`);
+  assert.equal(r.data.watched[0].username, 'ben');
+  assert.equal(r.data.watched[0].rating, 9);
+  r = await admin('GET', '/api/feed');
+  assert.equal(r.data.items[0].type, 'watch');
+  assert.equal(r.data.items[0].watch.id, watchId);
+  r = await member('GET', '/api/notifications');
+  assert.match(r.data.items[0].text, /started following you/);
+  r = await admin('POST', `/api/watches/${watchId}/like`);
+  r = await anon('GET', `/api/watches/${watchId}`);
+  assert.equal(r.data.watch.likes, 1);
+  r = await admin('GET', '/api/users/ben/compare');
+  assert.equal(r.data.theirs_only.length, 1);
+  r = await admin('GET', '/api/friends');
+  assert.equal(r.data.following[0].username, 'ben');
+  assert.equal(r.data.following[0].stats.films, 1);
+});
+
+test('watchlist, likes and favourites', async () => {
+  const filmId = (await anon('GET', `/api/editions/${editionId}`)).data.film.id;
+  let r = await admin('POST', `/api/films/${filmId}/watchlist`);
+  assert.equal(r.data.watchlist, true);
+  r = await admin('GET', '/api/users/ada/watchlist');
+  assert.equal(r.data.items[0].film.id, filmId);
+  r = await admin('POST', '/api/watches', { film_id: filmId, watched_on: '2026-11-05', via: 'cinema' });
+  r = await admin('GET', '/api/users/ada/watchlist');
+  assert.equal(r.data.items.length, 0, 'logging a film takes it off the watchlist');
+  r = await admin('PATCH', '/api/me', { favourites: [filmId], display_name: 'Ada L.' });
+  assert.deepEqual(r.data.user.favourites, [filmId]);
+  r = await anon('GET', '/api/users/ada');
+  assert.equal(r.data.favourites[0].id, filmId);
+  assert.equal(r.data.stats.films, 1);
+});
+
+test('netflix history import logs films and asks for reviews', async () => {
+  const csv = 'Title,Date\n"Stalker","05/11/26"\n"Stranger Things: Season 1: Chapter One","02/11/26"\n"Stalkr","03/11/26"\n"Some Film Nobody Added","04/11/26"\n"Stalker","05/11/26"\n';
+  let r = await member('POST', '/api/streaming/import/preview', { service: 'netflix', csv, order: 'dmy' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.skipped.tv, 1);
+  assert.equal(r.data.rows.length, 3, 'tv skipped and the duplicate row collapsed');
+  assert.equal(r.data.rows[0].film.title, 'Stalker');
+  assert.equal(r.data.rows[0].date, '2026-11-05');
+  assert.ok(r.data.rows[1].film || r.data.rows[1].candidates.length, 'typo gets a match or candidates');
+  assert.equal(r.data.rows[2].film, null);
+  const rows = [
+    { film_id: r.data.rows[0].film.id, date: r.data.rows[0].date },
+    { skip: true },
+    { new_title: 'Some Film Nobody Added', date: '2026-11-04' }
+  ];
+  r = await member('POST', '/api/streaming/import/commit', { service: 'netflix', rows });
+  assert.equal(r.data.logged, 2);
+  assert.equal(r.data.created, 1);
+  r = await member('GET', '/api/prompts');
+  assert.equal(r.data.items.length, 2, 'both imported watches wait for a review');
+  assert.equal(r.data.items[0].via, 'netflix');
+  const p = r.data.items[0];
+  r = await member('PATCH', `/api/watches/${p.id}`, { rating: 8, review: 'Better than I remembered.' });
+  r = await member('GET', '/api/prompts');
+  assert.equal(r.data.items.length, 1, 'reviewing clears the prompt');
+  r = await member('POST', `/api/prompts/${r.data.items[0].id}`, { action: 'not_me' });
+  r = await member('GET', '/api/prompts');
+  assert.equal(r.data.items.length, 0);
+  r = await member('GET', '/api/streaming');
+  assert.equal(r.data.accounts.find((a) => a.service === 'netflix').service, 'netflix');
+  assert.equal(r.data.imports[0].logged, 2);
+  r = await member('GET', '/api/users/ben/diary');
+  assert.ok(r.data.items.some((w) => w.source === 'import:netflix' && w.rating === 8));
+});
+
+test('lists', async () => {
+  let r = await member('POST', '/api/lists', { title: 'Tarkovsky on disc', edition_id: editionId });
+  assert.equal(r.status, 200);
   const listId = r.data.id;
   await member('POST', `/api/lists/${listId}/items`, { edition_id: secondId, note: 'PAL' });
   await member('PUT', `/api/lists/${listId}/order`, { edition_ids: [secondId, editionId] });
@@ -163,6 +250,8 @@ test('merging duplicates moves collections and redirects', async () => {
   assert.equal(e.data.redirect, editionId);
   const c = await admin('GET', '/api/users/ada/collection');
   assert.ok(c.data.items.every((i) => i.edition.id === editionId));
+  const d = await anon('GET', `/api/editions/${editionId}`);
+  assert.ok(d.data.reviews.length >= 1, 'diary entries stay attached after a merge');
 });
 
 test('image upload checks the file type', async () => {

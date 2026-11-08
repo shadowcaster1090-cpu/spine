@@ -173,6 +173,95 @@ const MIGRATIONS = [
   );
   CREATE INDEX notifications_user ON notifications(user_id, read);
   CREATE VIRTUAL TABLE search_index USING fts5(edition_id UNINDEXED, body, tokenize='trigram');
+  `,
+  // 2: the social layer. Film-level diary entries replace edition reviews; follows, watchlist, likes,
+  // streaming connections and imports; richer profiles.
+  `
+  ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE users ADD COLUMN favourites TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE users ADD COLUMN public_diary INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE users ADD COLUMN prompt_reviews INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'system';
+
+  CREATE TABLE follows (
+    follower_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    followed_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (follower_id, followed_id)
+  );
+  CREATE INDEX follows_followed ON follows(followed_id);
+
+  CREATE TABLE watches (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    film_id INTEGER NOT NULL REFERENCES films(id),
+    watched_on TEXT NOT NULL DEFAULT '',
+    via TEXT NOT NULL DEFAULT '' CHECK (via IN ('', 'dvd', 'netflix', 'prime', 'disney', 'apple', 'mubi', 'bfi', 'cinema', 'tv', 'other')),
+    edition_id INTEGER REFERENCES editions(id),
+    copy_id INTEGER REFERENCES copies(id) ON DELETE SET NULL,
+    rewatch INTEGER NOT NULL DEFAULT 0,
+    rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 1 AND 10),
+    liked INTEGER NOT NULL DEFAULT 0,
+    review TEXT NOT NULL DEFAULT '',
+    spoilers INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'manual',
+    prompt_state TEXT NOT NULL DEFAULT 'none' CHECK (prompt_state IN ('none', 'pending', 'done', 'dismissed')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX watches_user ON watches(user_id, watched_on);
+  CREATE INDEX watches_film ON watches(film_id);
+  CREATE INDEX watches_edition ON watches(edition_id);
+  CREATE INDEX watches_prompt ON watches(user_id, prompt_state);
+
+  CREATE TABLE review_likes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, watch_id)
+  );
+  CREATE TABLE likes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    film_id INTEGER NOT NULL REFERENCES films(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, film_id)
+  );
+  CREATE TABLE watchlist (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    film_id INTEGER NOT NULL REFERENCES films(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, film_id)
+  );
+  CREATE TABLE streaming_accounts (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    access_token TEXT NOT NULL DEFAULT '',
+    refresh_token TEXT NOT NULL DEFAULT '',
+    token_expires INTEGER,
+    last_sync_at TEXT,
+    connected_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, service)
+  );
+  CREATE TABLE watch_imports (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service TEXT NOT NULL,
+    rows INTEGER NOT NULL DEFAULT 0,
+    logged INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE VIRTUAL TABLE film_index USING fts5(film_id UNINDEXED, body, tokenize='trigram');
+  INSERT INTO film_index (film_id, body)
+    SELECT f.id, f.title || ' ' || f.original_title || ' ' || coalesce((SELECT group_concat(p.name, ' ') FROM film_directors fd JOIN people p ON p.id = fd.person_id WHERE fd.film_id = f.id), '')
+    FROM films f;
+
+  INSERT INTO watches (user_id, film_id, watched_on, via, edition_id, rating, review, created_at, updated_at)
+    SELECT r.user_id, e.film_id, substr(r.created_at, 1, 10), 'dvd', r.edition_id, r.rating * 2, r.body, r.created_at, r.updated_at
+    FROM reviews r JOIN editions e ON e.id = r.edition_id;
+  DROP TABLE reviews;
   `
 ];
 

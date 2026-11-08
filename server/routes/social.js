@@ -8,23 +8,6 @@ export default function (r, { db, fail }) {
     return e.id;
   };
 
-  r.put('/api/editions/:id/review', ({ params, body, user }) => {
-    requireUser(user);
-    const id = liveEdition(params.id);
-    const rating = Number(body.rating);
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5) fail(400, 'Give a rating from 1 to 5.');
-    const text = String(body.body || '').trim().slice(0, 5000);
-    db.prepare(`INSERT INTO reviews (user_id, edition_id, rating, body) VALUES (?, ?, ?, ?)
-      ON CONFLICT (user_id, edition_id) DO UPDATE SET rating = excluded.rating, body = excluded.body, updated_at = datetime('now')`).run(user.id, id, rating, text);
-    return { ok: true };
-  });
-
-  r.delete('/api/editions/:id/review', ({ params, user }) => {
-    requireUser(user);
-    db.prepare('DELETE FROM reviews WHERE user_id = ? AND edition_id = ?').run(user.id, +params.id);
-    return { ok: true };
-  });
-
   /* lists */
   const loadList = (id, user, write) => {
     const l = db.prepare('SELECT l.*, u.username FROM lists l JOIN users u ON u.id = l.user_id WHERE l.id = ?').get(+id);

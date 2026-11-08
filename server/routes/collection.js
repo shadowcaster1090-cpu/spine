@@ -1,5 +1,5 @@
 import { requireUser } from '../auth.js';
-import { cards } from '../catalogue.js';
+import { cards, filmsById, watchRows } from '../catalogue.js';
 import { parseCsv, toCsv } from '../csv.js';
 import { tx } from '../db.js';
 
@@ -37,15 +37,33 @@ export default function (r, { db, fail }) {
 
   r.get('/api/users/:name', ({ params, user }) => {
     const { u, own, visible } = findUser(params.name, user);
+    const full = db.prepare('SELECT display_name, public_diary, favourites FROM users WHERE id = ?').get(u.id);
+    const year = new Date().getFullYear() + '';
     const s = db.prepare(`SELECT (SELECT count(*) FROM copies WHERE user_id = ?) copies,
       (SELECT count(DISTINCT edition_id) FROM copies WHERE user_id = ?) editions,
       (SELECT count(*) FROM wants WHERE user_id = ?) wants,
-      (SELECT count(*) FROM reviews WHERE user_id = ?) reviews,
+      (SELECT count(DISTINCT film_id) FROM watches WHERE user_id = ?) films,
+      (SELECT count(*) FROM watches WHERE user_id = ? AND substr(watched_on, 1, 4) = ?) this_year,
+      (SELECT count(*) FROM watches WHERE user_id = ?) diary,
+      (SELECT count(*) FROM watches WHERE user_id = ? AND review != '') reviews,
+      (SELECT count(*) FROM watchlist WHERE user_id = ?) watchlist,
+      (SELECT count(*) FROM likes WHERE user_id = ?) likes,
       (SELECT count(*) FROM lists WHERE user_id = ? AND (public = 1 OR ?)) lists,
-      (SELECT count(*) FROM submissions WHERE user_id = ? AND status = 'approved') contributions`).get(u.id, u.id, u.id, u.id, u.id, own ? 1 : 0, u.id);
-    const reviews = db.prepare(`SELECT r.rating, r.body, r.updated_at, r.edition_id, f.title, l.name label FROM reviews r JOIN editions e ON e.id = r.edition_id
-      JOIN films f ON f.id = e.film_id LEFT JOIN labels l ON l.id = e.label_id WHERE r.user_id = ? ORDER BY r.updated_at DESC LIMIT 10`).all(u.id);
-    return { user: { ...u, public_collection: !!u.public_collection }, own, visible, stats: s, reviews };
+      (SELECT count(*) FROM follows WHERE follower_id = ?) following,
+      (SELECT count(*) FROM follows WHERE followed_id = ?) followers,
+      (SELECT count(*) FROM submissions WHERE user_id = ? AND status = 'approved') contributions`)
+      .get(u.id, u.id, u.id, u.id, u.id, year, u.id, u.id, u.id, u.id, u.id, own ? 1 : 0, u.id, u.id, u.id);
+    const favIds = JSON.parse(full.favourites || '[]');
+    const favFilms = filmsById(db, favIds);
+    const recent = (own || full.public_diary) ? watchRows(db, 'w.user_id = ?', [u.id], user, 6) : [];
+    const ratings = db.prepare('SELECT rating, count(*) n FROM watches WHERE user_id = ? AND rating IS NOT NULL GROUP BY rating').all(u.id);
+    return {
+      user: { ...u, display_name: full.display_name, public_collection: !!u.public_collection, public_diary: !!full.public_diary },
+      own, visible, diary_visible: own || !!full.public_diary, stats: s,
+      favourites: favIds.map((id) => favFilms[id]).filter(Boolean), recent, ratings,
+      following: !!user && !!db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?').get(user.id, u.id),
+      follows_you: !!user && !!db.prepare('SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?').get(u.id, user.id)
+    };
   });
 
   r.get('/api/users/:name/collection', ({ params, user }) => {

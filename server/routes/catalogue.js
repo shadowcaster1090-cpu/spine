@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt } from '../catalogue.js';
+import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt, filmCards, searchFilms, filmsById, watchRows } from '../catalogue.js';
 import { requireUser, requireMod, isMod } from '../auth.js';
 
 const MAGIC = [
@@ -11,18 +11,31 @@ const MAGIC = [
 ];
 
 export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
-  r.get('/api/home', () => {
+  r.get('/api/home', ({ user }) => {
     const stats = db.prepare(`SELECT (SELECT count(*) FROM editions WHERE merged_into IS NULL) editions,
       (SELECT count(*) FROM films) films, (SELECT count(*) FROM labels) labels, (SELECT count(*) FROM users) members,
-      (SELECT count(*) FROM copies) copies`).get();
-    // Feature the most-wanted edition that has a real scan; fall back to most-wanted overall.
+      (SELECT count(*) FROM copies) copies, (SELECT count(*) FROM watches) watches`).get();
     const featured = cards(db, 'e.cover_image_id IS NOT NULL', [], 'want DESC, have DESC', 1)[0] || cards(db, '1', [], 'want DESC, have DESC, e.id', 1)[0] || null;
     const recent = cards(db, '1', [], 'e.id DESC', 12);
+    const popular = filmCards(db, '1', [], 'watches DESC, likes DESC, f.title', 12);
+    const reviews = watchRows(db, "w.review != ''", [], user, 6);
     const labels = db.prepare(`SELECT l.id, l.name, l.country, count(e.id) n FROM labels l JOIN editions e ON e.label_id = l.id AND e.merged_into IS NULL
-      GROUP BY l.id ORDER BY n DESC LIMIT 12`).all();
+      GROUP BY l.id ORDER BY n DESC LIMIT 8`).all();
     const lists = db.prepare(`SELECT l.id, l.title, u.username, (SELECT count(*) FROM list_items WHERE list_id = l.id) n FROM lists l
       JOIN users u ON u.id = l.user_id WHERE l.public = 1 AND EXISTS (SELECT 1 FROM list_items WHERE list_id = l.id) ORDER BY l.updated_at DESC LIMIT 6`).all();
-    return { stats, featured, recent, labels, lists };
+    let mine = null;
+    if (user) {
+      const year = new Date().getFullYear() + '';
+      mine = {
+        this_year: db.prepare('SELECT count(*) n FROM watches WHERE user_id = ? AND substr(watched_on, 1, 4) = ?').get(user.id, year).n,
+        films: db.prepare('SELECT count(DISTINCT film_id) n FROM watches WHERE user_id = ?').get(user.id).n,
+        copies: db.prepare('SELECT count(*) n FROM copies WHERE user_id = ?').get(user.id).n,
+        following: db.prepare('SELECT count(*) n FROM follows WHERE follower_id = ?').get(user.id).n,
+        watchlist: (() => { const rows = db.prepare('SELECT film_id FROM watchlist WHERE user_id = ? ORDER BY created_at DESC LIMIT 8').all(user.id); const f = filmsById(db, rows.map((x) => x.film_id)); return rows.map((x) => f[x.film_id]).filter(Boolean); })(),
+        recent: watchRows(db, 'w.user_id = ?', [user.id], user, 4)
+      };
+    }
+    return { stats, featured, recent, popular, reviews, labels, lists, mine };
   });
 
   r.get('/api/editions', ({ query }) => searchEditions(db, query));
@@ -51,17 +64,43 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
 
   r.get('/api/films', ({ query }) => {
     const q = (query.get('q') || '').trim();
-    if (q.length < 2) return { items: [] };
-    const rows = db.prepare(`SELECT f.id, f.title, f.year, f.country, (SELECT count(*) FROM editions WHERE film_id = f.id AND merged_into IS NULL) editions
-      FROM films f WHERE f.title LIKE ? OR f.original_title LIKE ? ORDER BY f.title COLLATE NOCASE LIMIT 12`).all(`%${q}%`, `%${q}%`);
-    return { items: rows.map((f) => ({ ...f, directors: getFilmRow(db, f.id).directors })) };
+    if (q) return { items: searchFilms(db, q, 12) };
+    const where = [], params = [];
+    if (query.get('decade')) { where.push('f.year >= ? AND f.year < ?'); params.push(+query.get('decade'), +query.get('decade') + 10); }
+    if (query.get('director')) { where.push('f.id IN (SELECT film_id FROM film_directors WHERE person_id = ?)'); params.push(+query.get('director')); }
+    const order = { title: 'f.title COLLATE NOCASE', year: 'f.year DESC, f.title', popular: 'watches DESC, likes DESC, f.title', rating: 'rating DESC NULLS LAST, watches DESC', recent: 'f.id DESC' }[query.get('sort')] || 'f.title COLLATE NOCASE';
+    const limit = Math.min(+query.get('limit') || 48, 100), page = Math.max(+query.get('page') || 1, 1);
+    const w = where.join(' AND ') || '1';
+    const total = db.prepare(`SELECT count(*) n FROM films f WHERE ${w}`).get(...params).n;
+    return { items: filmCards(db, w, params, order, limit, (page - 1) * limit), total, page, pages: Math.max(1, Math.ceil(total / limit)) };
   });
 
-  r.get('/api/films/:id', ({ params }) => {
+  r.get('/api/films/:id', ({ params, user }) => {
     const film = getFilmRow(db, +params.id);
     const editions = cards(db, 'e.film_id = ?', [film.id], 'e.release_year, e.id', 100);
     const revisions = db.prepare("SELECT count(*) n FROM revisions WHERE entity = 'film' AND entity_id = ?").get(film.id).n;
-    return { film, editions, revisions };
+    const stats = db.prepare(`SELECT (SELECT count(*) FROM watches WHERE film_id = ?) watches,
+      (SELECT count(DISTINCT user_id) FROM watches WHERE film_id = ?) watchers,
+      (SELECT round(avg(rating) / 2.0, 2) FROM watches WHERE film_id = ? AND rating IS NOT NULL) rating,
+      (SELECT count(*) FROM watches WHERE film_id = ? AND rating IS NOT NULL) ratings,
+      (SELECT count(*) FROM likes WHERE film_id = ?) likes,
+      (SELECT count(*) FROM watchlist WHERE film_id = ?) watchlist,
+      (SELECT count(DISTINCT c.user_id) FROM copies c JOIN editions e ON e.id = c.edition_id WHERE e.film_id = ?) owners`).get(film.id, film.id, film.id, film.id, film.id, film.id, film.id);
+    const histogram = db.prepare('SELECT rating, count(*) n FROM watches WHERE film_id = ? AND rating IS NOT NULL GROUP BY rating').all(film.id);
+    const reviews = watchRows(db, "w.film_id = ? AND w.review != ''", [film.id], user, 30);
+    let mine = null;
+    if (user) {
+      mine = {
+        watches: watchRows(db, 'w.film_id = ? AND w.user_id = ?', [film.id, user.id], user, 50),
+        liked: !!db.prepare('SELECT 1 FROM likes WHERE user_id = ? AND film_id = ?').get(user.id, film.id),
+        watchlist: !!db.prepare('SELECT 1 FROM watchlist WHERE user_id = ? AND film_id = ?').get(user.id, film.id),
+        copies: db.prepare(`SELECT c.id, c.edition_id, c.disc_cond, e.cat_no, e.region, e.standard, l.name label FROM copies c JOIN editions e ON e.id = c.edition_id
+          LEFT JOIN labels l ON l.id = e.label_id WHERE c.user_id = ? AND e.film_id = ? ORDER BY c.id`).all(user.id, film.id),
+        wants: db.prepare('SELECT w.edition_id FROM wants w JOIN editions e ON e.id = w.edition_id WHERE w.user_id = ? AND e.film_id = ?').all(user.id, film.id).map((x) => x.edition_id)
+      };
+    }
+    const related = film.directors.length ? filmCards(db, 'f.id != ? AND f.id IN (SELECT film_id FROM film_directors WHERE person_id = ?)', [film.id, film.directors[0].id], 'f.year', 8) : [];
+    return { film, editions, revisions, stats, histogram, reviews, mine, related };
   });
 
   r.get('/api/labels', () => ({

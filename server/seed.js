@@ -64,10 +64,12 @@ if (db.prepare('SELECT 1 FROM editions LIMIT 1').get()) {
 }
 
 tx(db, () => {
-  const mk = (username, email, role) => Number(db.prepare('INSERT INTO users (username, email, pass, role, bio) VALUES (?, ?, ?, ?, ?)')
-    .run(username, email, hashPassword('spine-demo'), role, role === 'admin' ? 'Runs the register. Region 2 completist.' : 'Mostly Japanese cinema.').lastInsertRowid);
-  const admin = mk('demo', 'demo@example.com', 'admin');
-  const member = mk('cinephile', 'cinephile@example.com', 'member');
+  const mk = (username, email, role, display, bio) => Number(db.prepare('INSERT INTO users (username, email, pass, role, display_name, bio) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(username, email, hashPassword('spine-demo'), role, display, bio).lastInsertRowid);
+  const admin = mk('demo', 'demo@example.com', 'admin', 'Sharaf', 'Runs the register. Region 2 completist, Tarkovsky and Wong Kar-wai above all.');
+  const member = mk('cinephile', 'cinephile@example.com', 'member', 'Mina', 'Mostly Japanese cinema. Ozu on a Sunday afternoon.');
+  const nour = mk('nour', 'nour@example.com', 'member', 'Nour', 'French New Wave and anything with a good booklet.');
+  const tomas = mk('tomas', 'tomas@example.com', 'member', 'Tomás', 'Lynch, Scorsese, late nights. Still buying snapper cases.');
   for (const [name, [country, about]] of Object.entries(LABELS)) db.prepare('INSERT INTO labels (name, country, about) VALUES (?, ?, ?)').run(name, country, about);
 
   const ids = {};
@@ -101,11 +103,71 @@ tx(db, () => {
   for (const [t, i] of [['Tokyo Story', 0], ['Ugetsu', 0], ['Seven Samurai', 2], ['Stalker', 1], ['Yi Yi', 0]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond) VALUES (?, ?, ?, ?)').run(member, e(t, i), 'NM', 'NM');
   db.prepare('INSERT INTO wants (user_id, edition_id) VALUES (?, ?)').run(member, e('In the Mood for Love', 0));
 
-  const rv = (u, t, i, rating, body) => db.prepare('INSERT INTO reviews (user_id, edition_id, rating, body) VALUES (?, ?, ?, ?)').run(u, e(t, i), rating, body);
-  rv(admin, 'Stalker', 0, 5, 'The transfer finally keeps the sepia sections warm instead of green. The cinematographer interview alone is worth the price.');
-  rv(member, 'Stalker', 1, 4, 'Booklet is excellent. PAL speed-up is noticeable in the score if you know the film well.');
-  rv(member, 'Tokyo Story', 0, 5, 'Stable, grain intact, and the commentary is patient and generous.');
-  rv(admin, 'In the Mood for Love', 0, 4, 'Lovely colour. The deleted scenes disc is the reason to own this one.');
+  // Diaries. Ratings are half-stars (1–10). via 'dvd' entries point at the copy they were watched on.
+  const fid = (t) => db.prepare('SELECT film_id FROM editions WHERE id = ?').get(e(t)).film_id;
+  const copyOf = (u, t, i) => db.prepare('SELECT id FROM copies WHERE user_id = ? AND edition_id = ?').get(u, e(t, i));
+  const log = (u, t, { on, via = 'dvd', i = 0, rating = null, liked = 0, review = '', rewatch = 0, source = 'manual', prompt = 'none', daysAgo = null }) => {
+    const c = via === 'dvd' ? copyOf(u, t, i) : null;
+    const date = on || new Date(Date.now() - daysAgo * 864e5).toISOString().slice(0, 10);
+    db.prepare(`INSERT INTO watches (user_id, film_id, watched_on, via, edition_id, copy_id, rewatch, rating, liked, review, source, prompt_state, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(u, fid(t), date, via, c ? e(t, i) : (via === 'dvd' ? e(t, i) : null), c ? c.id : null, rewatch, rating, liked, review, source, prompt, date + ' 21:30:00', date + ' 21:30:00');
+    if (liked) db.prepare('INSERT OR IGNORE INTO likes (user_id, film_id) VALUES (?, ?)').run(u, fid(t));
+  };
+  log(admin, 'Stalker', { daysAgo: 3, rating: 10, liked: 1, review: 'The transfer finally keeps the sepia sections warm instead of green. Watched on the Halide two-disc, and the cinematographer interview alone is worth the price. The Zone has never looked more like a place you could walk into.' });
+  log(admin, 'In the Mood for Love', { daysAgo: 9, rating: 9, liked: 1, review: 'Lovely colour on this disc. The deleted scenes are the reason to own the Halide edition; the Obsidian one is softer but has the better cover.' });
+  log(admin, 'Solaris', { daysAgo: 16, rating: 9, review: 'Slower than I remembered, and better for it.' });
+  log(admin, 'La Haine', { daysAgo: 24, rating: 8 });
+  log(admin, 'Chungking Express', { daysAgo: 31, rating: 9, liked: 1, rewatch: 1, review: 'Fourth time. California Dreamin’ still works.' });
+  log(admin, 'Cléo from 5 to 7', { daysAgo: 40, rating: 9 });
+  log(admin, 'The Red Shoes', { i: 1, daysAgo: 55, rating: 10, liked: 1, review: 'The Silver Salt two-disc is the one to own: the restoration demo shows how far gone the negative was.' });
+  log(admin, 'Taxi Driver', { daysAgo: 70, rating: 8, rewatch: 1 });
+  log(admin, 'Breathless', { i: 1, daysAgo: 95, rating: 7 });
+  log(admin, 'Tokyo Story', { daysAgo: 130, rating: 10, liked: 1 });
+  // A Netflix import from last week, still waiting for ratings: these show up as prompts when demo opens the app.
+  log(admin, 'Mulholland Drive', { daysAgo: 1, via: 'netflix', source: 'import:netflix', prompt: 'pending', rewatch: 1 });
+  log(admin, 'Paris, Texas', { daysAgo: 2, via: 'netflix', source: 'import:netflix', prompt: 'pending' });
+  log(admin, 'Happy Together', { daysAgo: 6, via: 'netflix', source: 'import:netflix', prompt: 'pending', rewatch: 1 });
+  db.prepare("INSERT INTO streaming_accounts (user_id, service, label, last_sync_at) VALUES (?, 'netflix', 'Family account', datetime('now', '-1 day'))").run(admin);
+  db.prepare("INSERT INTO watch_imports (user_id, service, rows, logged, skipped, created_at) VALUES (?, 'netflix', 41, 3, 38, datetime('now', '-1 day'))").run(admin);
+
+  log(member, 'Tokyo Story', { daysAgo: 2, rating: 10, liked: 1, review: 'Stable, grain intact, and the commentary is patient and generous. The Halide disc remains the one to own.' });
+  log(member, 'Stalker', { i: 1, daysAgo: 5, rating: 8, review: 'Booklet is excellent. PAL speed-up is noticeable in the score if you know the film well.' });
+  log(member, 'Ugetsu', { daysAgo: 12, rating: 9, liked: 1 });
+  log(member, 'Seven Samurai', { i: 2, daysAgo: 20, rating: 10, liked: 1, review: 'Three and a half hours that feel like ninety minutes.' });
+  log(member, 'Yi Yi', { daysAgo: 33, rating: 9 });
+  log(member, 'In the Mood for Love', { daysAgo: 48, via: 'mubi', rating: 9, liked: 1 });
+  log(member, 'Persona', { daysAgo: 60, via: 'cinema', rating: 8, review: 'Saw it at the BFI on a 35mm print. The film burning through the gate got a gasp.' });
+
+  for (const [t, i] of [['Breathless', 0], ['Cléo from 5 to 7', 1], ['La Haine', 0], ['Beau Travail', 0], ['8½', 1]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond) VALUES (?, ?, ?, ?)').run(nour, e(t, i), 'NM', 'VG+');
+  log(nour, 'Breathless', { daysAgo: 4, rating: 9, liked: 1, review: 'Still the most alive film ever made. The Lumière disc is bare but the transfer is honest.' });
+  log(nour, 'Cléo from 5 to 7', { i: 1, daysAgo: 11, rating: 10, liked: 1 });
+  log(nour, 'Beau Travail', { daysAgo: 18, rating: 9, review: 'That last scene.' });
+  log(nour, 'La Haine', { daysAgo: 27, rating: 8 });
+  log(nour, 'Stalker', { daysAgo: 45, via: 'prime', rating: 7, review: 'I think I need to see this properly, on a disc, in the dark.' });
+  log(nour, 'Mulholland Drive', { daysAgo: 80, via: 'netflix', rating: 9, liked: 1 });
+
+  for (const [t, i] of [['Mulholland Drive', 0], ['Eraserhead', 0], ['Taxi Driver', 0], ['Paris, Texas', 1], ['The Third Man', 0]]) db.prepare('INSERT INTO copies (user_id, edition_id, disc_cond, case_cond) VALUES (?, ?, ?, ?)').run(tomas, e(t, i), 'VG+', 'VG');
+  log(tomas, 'Mulholland Drive', { daysAgo: 1, rating: 10, liked: 1, rewatch: 1, review: 'The Meridian snapper case has survived four house moves. Silencio.' });
+  log(tomas, 'Eraserhead', { daysAgo: 8, rating: 8, review: 'Mono track on this disc is the right call.' });
+  log(tomas, 'Taxi Driver', { daysAgo: 15, rating: 9 });
+  log(tomas, 'Paris, Texas', { i: 1, daysAgo: 22, rating: 10, liked: 1 });
+  log(tomas, 'Chungking Express', { daysAgo: 50, via: 'netflix', rating: 8 });
+  log(tomas, 'The Third Man', { daysAgo: 65, rating: 9 });
+
+  // Who follows whom, watchlists, favourites.
+  const follow = (a, b) => db.prepare('INSERT OR IGNORE INTO follows (follower_id, followed_id) VALUES (?, ?)').run(a, b);
+  follow(admin, member); follow(admin, nour); follow(admin, tomas); follow(member, admin); follow(nour, admin); follow(nour, member); follow(tomas, admin); follow(tomas, nour);
+  const wl = (u, t) => db.prepare('INSERT OR IGNORE INTO watchlist (user_id, film_id) VALUES (?, ?)').run(u, fid(t));
+  wl(admin, 'Jeanne Dielman, 23 quai du Commerce, 1080 Bruxelles'); wl(admin, 'Close-Up'); wl(admin, 'Pather Panchali'); wl(admin, 'Beau Travail');
+  wl(member, 'Eraserhead'); wl(member, 'Taxi Driver'); wl(nour, 'Tokyo Story'); wl(nour, 'Yi Yi'); wl(tomas, 'Stalker'); wl(tomas, 'In the Mood for Love');
+  const favs = (u, ...ts) => db.prepare('UPDATE users SET favourites = ? WHERE id = ?').run(JSON.stringify(ts.map(fid)), u);
+  favs(admin, 'Stalker', 'In the Mood for Love', 'The Red Shoes', 'Tokyo Story');
+  favs(member, 'Tokyo Story', 'Seven Samurai', 'Ugetsu', 'Yi Yi');
+  favs(nour, 'Cléo from 5 to 7', 'Breathless', 'Beau Travail', 'Mulholland Drive');
+  favs(tomas, 'Mulholland Drive', 'Paris, Texas', 'Taxi Driver', 'Eraserhead');
+  db.prepare('INSERT INTO review_likes (user_id, watch_id) SELECT ?, id FROM watches WHERE user_id = ? AND review != \'\' LIMIT 3').run(member, admin);
+  db.prepare('INSERT INTO review_likes (user_id, watch_id) SELECT ?, id FROM watches WHERE user_id = ? AND review != \'\' LIMIT 2').run(nour, admin);
+  db.prepare('INSERT INTO review_likes (user_id, watch_id) SELECT ?, id FROM watches WHERE user_id = ? AND review != \'\' LIMIT 2').run(admin, tomas);
 
   const list = Number(db.prepare('INSERT INTO lists (user_id, title, description) VALUES (?, ?, ?)').run(admin, 'Region 2 essentials', 'PAL editions that beat their American counterparts on extras or transfer.').lastInsertRowid);
   [['Stalker', 1, 'Two discs, superb booklet.'], ['Seven Samurai', 2, ''], ['The Third Man', 1, 'Better than the early R1.'], ['Solaris', 1, '']].forEach(([t, i, note], pos) =>
@@ -117,5 +179,5 @@ tx(db, () => {
 });
 
 console.log(`Seeded ${db.prepare('SELECT count(*) n FROM editions').get().n} editions into ${file}.`);
-console.log('Demo sign-ins: demo / spine-demo (admin) and cinephile / spine-demo (member).');
+console.log('Demo sign-ins (password spine-demo): demo (admin), cinephile, nour, tomas.');
 db.close();

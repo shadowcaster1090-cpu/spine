@@ -8,6 +8,9 @@ import submissionRoutes from './routes/submissions.js';
 import collectionRoutes from './routes/collection.js';
 import socialRoutes from './routes/social.js';
 import accountRoutes from './routes/account.js';
+import diaryRoutes from './routes/diary.js';
+import friendsRoutes from './routes/friends.js';
+import streamingRoutes from './routes/streaming.js';
 import { editionMeta } from './catalogue.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -90,7 +93,7 @@ export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, 
   fs.mkdirSync(uploadsDir, { recursive: true });
   const r = makeRouter();
   const ctx = { db, uploadsDir, tmdbKey, secureCookies, fail, rateLimit };
-  for (const reg of [authRoutes, catalogueRoutes, submissionRoutes, collectionRoutes, socialRoutes, accountRoutes]) reg(r, ctx);
+  for (const reg of [authRoutes, catalogueRoutes, diaryRoutes, friendsRoutes, streamingRoutes, submissionRoutes, collectionRoutes, socialRoutes, accountRoutes]) reg(r, ctx);
   const indexHtml = () => fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
 
   function send(res, status, body, headers = {}) {
@@ -111,12 +114,20 @@ export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, 
   function spa(res, pathname) {
     let html = indexHtml();
     const m = pathname.match(/^\/release\/(\d+)/);
+    const fm = pathname.match(/^\/film\/(\d+)/);
     if (m) {
       const meta = editionMeta(db, +m[1]);
       if (meta) {
         const e = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
         html = html.replace(/<title>.*?<\/title>/, `<title>${e(meta.title)} · Spine</title>`)
           .replace('<!--meta-->', `<meta name="description" content="${e(meta.description)}"><meta property="og:title" content="${e(meta.title)}"><meta property="og:description" content="${e(meta.description)}">${meta.image ? `<meta property="og:image" content="/uploads/${e(meta.image)}">` : ''}`);
+      }
+    } else if (fm) {
+      const f = db.prepare('SELECT title, year, synopsis FROM films WHERE id = ?').get(+fm[1]);
+      if (f) {
+        const e = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        html = html.replace(/<title>.*?<\/title>/, `<title>${e(f.title)}${f.year ? ' (' + f.year + ')' : ''} · Spine</title>`)
+          .replace('<!--meta-->', `<meta name="description" content="${e(f.synopsis || 'Editions, reviews and who owns it, on Spine.')}">`);
       }
     }
     send(res, 200, html, { 'Content-Type': TYPES['.html'], 'Cache-Control': 'no-cache' });
@@ -148,7 +159,7 @@ export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, 
         if (origin && new URL(origin).host !== req.headers.host) fail(403, 'Cross-site request refused.');
       }
       const ip = req.socket.remoteAddress || '';
-      const body = req.method === 'GET' ? {} : await readBody(req, pathname.endsWith('/images') ? 8e6 : pathname.endsWith('/import') ? 4e6 : 2e5);
+      const body = req.method === 'GET' ? {} : await readBody(req, pathname.endsWith('/images') ? 8e6 : pathname.endsWith('/import') || pathname.includes('/import/') ? 6e6 : 2e5);
       const user = sessionUser(db, req);
       const out = await found.handler({ req, res, params: found.params, query: url.searchParams, body, user, ip });
       if (res.writableEnded) return;

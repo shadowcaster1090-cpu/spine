@@ -128,7 +128,8 @@ const CARD_SQL = `SELECT e.id, e.cat_no, e.spine_no, e.region, e.standard, e.oop
   (SELECT file FROM images WHERE id = e.cover_image_id) AS cover,
   (SELECT count(DISTINCT user_id) FROM copies WHERE edition_id = e.id) AS have,
   (SELECT count(*) FROM wants WHERE edition_id = e.id) AS want,
-  (SELECT round(avg(rating), 2) FROM reviews WHERE edition_id = e.id) AS rating,
+  (SELECT round(avg(rating) / 2.0, 1) FROM watches WHERE film_id = e.film_id AND rating IS NOT NULL) AS rating,
+  (SELECT count(*) FROM watches WHERE film_id = e.film_id) AS watches,
   (SELECT json_array_length(e.extras)) AS extras_count
   FROM editions e JOIN films f ON f.id = e.film_id LEFT JOIN labels l ON l.id = e.label_id`;
 
@@ -198,6 +199,14 @@ export function searchEditions(db, query) {
   return { items, total, page, pages: Math.max(1, Math.ceil(total / limit)), fuzzy };
 }
 
+export function reindexFilm(db, filmId) {
+  db.prepare('DELETE FROM film_index WHERE film_id = ?').run(filmId);
+  const f = db.prepare('SELECT title, original_title FROM films WHERE id = ?').get(filmId);
+  if (!f) return;
+  const dirs = db.prepare('SELECT p.name FROM film_directors fd JOIN people p ON p.id = fd.person_id WHERE fd.film_id = ?').all(filmId).map((d) => d.name);
+  db.prepare('INSERT INTO film_index (film_id, body) VALUES (?, ?)').run(filmId, [f.title, f.original_title, ...dirs].filter(Boolean).join(' '));
+}
+
 export function reindex(db, editionId) {
   db.prepare('DELETE FROM search_index WHERE edition_id = ?').run(editionId);
   const e = db.prepare(`SELECT e.*, f.title, f.original_title, f.year, f.country, l.name AS label FROM editions e
@@ -219,10 +228,12 @@ export function getEdition(db, id, user) {
   const stats = db.prepare(`SELECT
     (SELECT count(DISTINCT user_id) FROM copies WHERE edition_id = ?) AS have,
     (SELECT count(*) FROM wants WHERE edition_id = ?) AS want,
-    (SELECT round(avg(rating), 2) FROM reviews WHERE edition_id = ?) AS rating,
-    (SELECT count(*) FROM reviews WHERE edition_id = ?) AS votes`).get(id, id, id, id);
-  const reviews = db.prepare(`SELECT r.id, r.rating, r.body, r.created_at, r.updated_at, u.username FROM reviews r
-    JOIN users u ON u.id = r.user_id WHERE r.edition_id = ? ORDER BY r.updated_at DESC LIMIT 50`).all(id);
+    (SELECT round(avg(rating) / 2.0, 1) FROM watches WHERE edition_id = ? AND rating IS NOT NULL) AS rating,
+    (SELECT count(*) FROM watches WHERE edition_id = ?) AS watches,
+    (SELECT round(avg(rating) / 2.0, 1) FROM watches WHERE film_id = ? AND rating IS NOT NULL) AS film_rating,
+    (SELECT count(*) FROM watches WHERE film_id = ?) AS film_watches`).get(id, id, id, id, e.film_id, e.film_id);
+  // Diary entries where someone watched this exact disc.
+  const reviews = watchRows(db, 'w.edition_id = ?', [id], user, 50);
   const siblings = cards(db, 'e.film_id = ?', [e.film_id], 'e.release_year, e.id', 50);
   const lists = db.prepare(`SELECT l.id, l.title, u.username FROM list_items li JOIN lists l ON l.id = li.list_id
     JOIN users u ON u.id = l.user_id WHERE li.edition_id = ? AND l.public = 1 ORDER BY l.updated_at DESC LIMIT 8`).all(id);
@@ -233,7 +244,7 @@ export function getEdition(db, id, user) {
     mine = {
       copies: db.prepare('SELECT * FROM copies WHERE user_id = ? AND edition_id = ? ORDER BY id').all(user.id, id),
       want: !!db.prepare('SELECT 1 FROM wants WHERE user_id = ? AND edition_id = ?').get(user.id, id),
-      review: db.prepare('SELECT rating, body FROM reviews WHERE user_id = ? AND edition_id = ?').get(user.id, id) || null,
+      watches: db.prepare('SELECT id, watched_on, rating, liked, review FROM watches WHERE user_id = ? AND edition_id = ? ORDER BY watched_on DESC, id DESC').all(user.id, id),
       lists: db.prepare(`SELECT l.id, l.title, EXISTS(SELECT 1 FROM list_items WHERE list_id = l.id AND edition_id = ?) AS has
         FROM lists l WHERE l.user_id = ? ORDER BY l.updated_at DESC`).all(id, user.id).map((l) => ({ ...l, has: !!l.has }))
     };
@@ -304,6 +315,7 @@ function findOrCreateFilm(db, input) {
   const { lastInsertRowid } = db.prepare(`INSERT INTO films (title, original_title, year, country, language, runtime, aspect, synopsis, tmdb_id, palette)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.title, f.original_title, v(f.year), f.country, f.language, v(f.runtime), f.aspect, f.synopsis, v(f.tmdb_id), JSON.stringify(paletteFor(f.title + f.year)));
   setDirectors(db, Number(lastInsertRowid), f.directors);
+  reindexFilm(db, Number(lastInsertRowid));
   return { id: Number(lastInsertRowid), created: true };
 }
 
@@ -394,6 +406,7 @@ export function applySubmission(db, sub, actorId) {
     const cols = Object.keys(after).filter((k) => k !== 'directors');
     if (cols.length) db.prepare(`UPDATE films SET ${cols.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((k) => v(after[k])), cur.id);
     for (const e of db.prepare('SELECT id FROM editions WHERE film_id = ?').all(cur.id)) reindex(db, e.id);
+    reindexFilm(db, cur.id);
     if (Object.keys(after).length) revision(db, 'film', cur.id, by, sub.id, payload.summary || 'Edited film details', before, after);
     return cur.id;
   }
@@ -423,8 +436,7 @@ export function mergeEditions(db, fromId, intoId, actorId) {
     db.prepare('UPDATE copies SET edition_id = ? WHERE edition_id = ?').run(intoId, fromId);
     db.prepare('INSERT OR IGNORE INTO wants (user_id, edition_id, note, created_at) SELECT user_id, ?, note, created_at FROM wants WHERE edition_id = ?').run(intoId, fromId);
     db.prepare('DELETE FROM wants WHERE edition_id = ?').run(fromId);
-    db.prepare('UPDATE reviews SET edition_id = ? WHERE edition_id = ? AND user_id NOT IN (SELECT user_id FROM reviews WHERE edition_id = ?)').run(intoId, fromId, intoId);
-    db.prepare('DELETE FROM reviews WHERE edition_id = ?').run(fromId);
+    db.prepare('UPDATE watches SET edition_id = ? WHERE edition_id = ?').run(intoId, fromId);
     db.prepare('INSERT OR IGNORE INTO list_items (list_id, edition_id, position, note) SELECT list_id, ?, position, note FROM list_items WHERE edition_id = ?').run(intoId, fromId);
     db.prepare('DELETE FROM list_items WHERE edition_id = ?').run(fromId);
     db.prepare('UPDATE images SET edition_id = ? WHERE edition_id = ?').run(intoId, fromId);
@@ -434,4 +446,64 @@ export function mergeEditions(db, fromId, intoId, actorId) {
     revision(db, 'edition', intoId, actorId, null, `Merged duplicate #${fromId} into this edition`, {}, { merged_from: fromId });
     revision(db, 'edition', fromId, actorId, null, `Merged into #${intoId}`, {}, { merged_into: intoId });
   });
+}
+
+
+/* ---------- films & diary ---------- */
+export function filmCard(r) {
+  return { ...r, palette: r.palette ? JSON.parse(r.palette) : paletteFor(r.title), rating: r.rating == null ? null : +r.rating };
+}
+
+const FILM_SQL = `SELECT f.id, f.title, f.original_title, f.year, f.country, f.runtime, f.palette,
+  (SELECT count(*) FROM editions WHERE film_id = f.id AND merged_into IS NULL) AS editions,
+  (SELECT round(avg(rating) / 2.0, 1) FROM watches WHERE film_id = f.id AND rating IS NOT NULL) AS rating,
+  (SELECT count(*) FROM watches WHERE film_id = f.id) AS watches,
+  (SELECT count(*) FROM likes WHERE film_id = f.id) AS likes,
+  (SELECT i.file FROM editions e JOIN images i ON i.id = e.cover_image_id WHERE e.film_id = f.id AND e.merged_into IS NULL ORDER BY e.id LIMIT 1) AS cover
+  FROM films f`;
+
+export function filmCards(db, where = '1', params = [], order = 'f.title COLLATE NOCASE', limit = 48, offset = 0) {
+  const rows = db.prepare(`${FILM_SQL} WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...params, limit, offset).map(filmCard);
+  return attachDirectors(db, rows, 'id');
+}
+
+export function filmsById(db, ids) {
+  ids = [...new Set(ids.filter((x) => x != null))];
+  if (!ids.length) return {};
+  const rows = filmCards(db, `f.id IN (${ids.map(() => '?').join(',')})`, ids, 'f.id', ids.length);
+  return Object.fromEntries(rows.map((f) => [f.id, f]));
+}
+
+export function searchFilms(db, q, limit = 20) {
+  q = (q || '').trim();
+  if (!q) return [];
+  if (q.length < 3) return filmCards(db, 'f.title LIKE ? OR f.original_title LIKE ?', [q + '%', q + '%'], 'f.title COLLATE NOCASE', limit);
+  const phrase = '"' + q.replace(/"/g, '""') + '"';
+  let rows = filmCards(db, 'f.id IN (SELECT film_id FROM film_index WHERE film_index MATCH ?)', [phrase], 'f.title COLLATE NOCASE', limit);
+  if (!rows.length && q.length >= 4) {
+    const s = q.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+    const grams = new Set();
+    for (const w of s.split(' ')) for (let i = 0; i + 3 <= w.length; i++) grams.add(w.slice(i, i + 3));
+    const ors = [...grams].map((g) => '"' + g.replace(/"/g, '""') + '"').join(' OR ');
+    if (ors) rows = filmCards(db, 'f.id IN (SELECT film_id FROM film_index WHERE film_index MATCH ? ORDER BY rank LIMIT 40)', [ors], 'f.title COLLATE NOCASE', limit);
+  }
+  return rows;
+}
+
+// Diary entries with the member, film and (if any) edition attached. `viewer` adds like state.
+export function watchRows(db, where, params, viewer, limit = 50, offset = 0) {
+  const rows = db.prepare(`SELECT w.*, u.username, u.display_name,
+      (SELECT count(*) FROM review_likes WHERE watch_id = w.id) AS likes,
+      ${viewer ? '(SELECT 1 FROM review_likes WHERE watch_id = w.id AND user_id = ?) AS liked_by_me,' : '0 AS liked_by_me,'}
+      e.cat_no, e.region, e.standard, l.name AS label
+    FROM watches w JOIN users u ON u.id = w.user_id
+    LEFT JOIN editions e ON e.id = w.edition_id LEFT JOIN labels l ON l.id = e.label_id
+    WHERE ${where} ORDER BY w.watched_on DESC, w.id DESC LIMIT ? OFFSET ?`).all(...(viewer ? [viewer.id] : []), ...params, limit, offset);
+  const films = filmsById(db, rows.map((r) => r.film_id));
+  return rows.map((r) => ({
+    id: r.id, user: { username: r.username, display_name: r.display_name }, film: films[r.film_id],
+    watched_on: r.watched_on, via: r.via, rewatch: !!r.rewatch, rating: r.rating, liked: !!r.liked, review: r.review, spoilers: !!r.spoilers,
+    source: r.source, created_at: r.created_at, updated_at: r.updated_at, likes: r.likes, liked_by_me: !!r.liked_by_me,
+    edition: r.edition_id ? { id: r.edition_id, cat_no: r.cat_no, region: r.region, standard: r.standard, label: r.label } : null
+  }));
 }

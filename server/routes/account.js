@@ -8,10 +8,16 @@ export default function (r, { db, fail }) {
     const q = (sql) => db.prepare(sql).all(user.id);
     const data = {
       exported_at: new Date().toISOString(),
-      account: db.prepare('SELECT id, username, email, role, bio, public_collection, created_at FROM users WHERE id = ?').get(user.id),
+      account: db.prepare('SELECT id, username, display_name, email, role, bio, public_collection, public_diary, prompt_reviews, favourites, created_at FROM users WHERE id = ?').get(user.id),
       copies: q('SELECT * FROM copies WHERE user_id = ?'),
       wants: q('SELECT * FROM wants WHERE user_id = ?'),
-      reviews: q('SELECT * FROM reviews WHERE user_id = ?'),
+      diary: q('SELECT * FROM watches WHERE user_id = ?'),
+      likes: q('SELECT * FROM likes WHERE user_id = ?'),
+      watchlist: q('SELECT * FROM watchlist WHERE user_id = ?'),
+      following: q('SELECT u.username, f.created_at FROM follows f JOIN users u ON u.id = f.followed_id WHERE f.follower_id = ?'),
+      followers: q('SELECT u.username, f.created_at FROM follows f JOIN users u ON u.id = f.follower_id WHERE f.followed_id = ?'),
+      streaming: q('SELECT service, label, last_sync_at, connected_at FROM streaming_accounts WHERE user_id = ?'),
+      imports: q('SELECT * FROM watch_imports WHERE user_id = ?'),
       lists: q('SELECT * FROM lists WHERE user_id = ?'),
       list_items: q('SELECT li.* FROM list_items li JOIN lists l ON l.id = li.list_id WHERE l.user_id = ?'),
       submissions: q('SELECT * FROM submissions WHERE user_id = ?'),
