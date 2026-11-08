@@ -111,7 +111,7 @@ export function refreshHeader() {
 function avatarStyle(name) { const t = document.createElement('div'); t.innerHTML = avatar(name); return t.firstElementChild.getAttribute('style'); }
 
 /* review prompts: once per session, when there is something waiting */
-async function checkPrompts() {
+export async function checkPrompts() {
   if (!me.user || !me.prompts) return;
   try {
     const r = await get('/api/prompts');

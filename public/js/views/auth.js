@@ -21,5 +21,6 @@ export default async function ({ el, params, query, go, refreshHeader }) {
     await loadMe(); refreshHeader();
     toast(signup ? `Welcome, ${me.user.username}` : 'Signed in');
     go(next, { replace: true });
+    import('../app.js').then((m) => m.checkPrompts()).catch(() => {});
   });
 }
