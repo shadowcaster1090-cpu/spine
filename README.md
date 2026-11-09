@@ -33,7 +33,7 @@ Spine is a film diary in the Letterboxd mould, joined to a Discogs-style registe
 
 **App**
 - An Apple-style interface: system type, light and dark (follows the device or your choice), translucent bars, a bottom tab bar on phones.
-- Scan a barcode the register has never seen and Spine asks the product-barcode services and TMDB what it is: the film, its real poster and credits, the label, format and region, and the retailer's cover image, ready to add with one tap. Every confirmed disc joins the shared register, so the next scan is instant.
+- Scan a barcode the register has never seen and Spine asks the product-barcode services and TMDB what it is: the film, its real poster and credits, the label, format and region, and the retailer's cover image, ready to add with one tap. Every confirmed disc joins the shared register, so the next scan is instant. A disc no service knows still opens a prefilled add form: the barcode's GS1 company prefix names the label (Warner Bros., Lionsgate, Criterion…) and its country prefix gives the region and TV standard.
 - Sign in with Google or Apple as well as a password; provider accounts can add a password later, and a member can link or unlink providers in Settings.
 - Installable on iPhone from Safari's share sheet ("Add to Home Screen"); the app shell works offline.
 - Accounts, password change, data export (JSON) and account deletion. The first account to sign up becomes the admin.
@@ -61,7 +61,8 @@ Demo sign-ins (password `spine-demo`): `demo` (admin, has a Netflix import waiti
 | `SECURE_COOKIES` | unset | Set to `1` when serving over HTTPS. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | unset | Turns on "Sign in with Google". Make an OAuth client (type: Web application) at console.cloud.google.com → APIs & Services → Credentials, with authorised redirect URI `https://your-host/api/auth/oauth/google/callback`. |
 | `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` | unset | Turns on "Sign in with Apple" (needs the Apple Developer Program). `APPLE_CLIENT_ID` is a Services ID with Sign in with Apple enabled and return URL `https://your-host/api/auth/oauth/apple/callback`; the key is a Sign in with Apple private key, pasted as PEM (`\n` escapes are fine). |
-| `UPCITEMDB_KEY` | unset | Barcode lookups use UPCitemdb's free trial endpoint (about 100 lookups a day per server) without a key; a paid key lifts the limit. `UPCDATABASE_KEY` adds UPCdatabase.org as a further source. |
+| `UPCITEMDB_KEY` | unset | Barcode lookups ask UPCitemdb's free trial endpoint (100 lookups a day per internet address) without a key; a paid key lifts the server's limit. The iPhone app asks from the phone's own address first and the server only when the phone cannot. `UPCDATABASE_KEY` adds UPCdatabase.org as a further source; Open Products Facts is always asked (`OPF_OFF=1` turns it off). Tests point the providers at mocks with `UPCITEMDB_BASE`, `OPF_BASE`, `UPCDATABASE_BASE`, `TMDB_BASE` and `TMDB_IMG_BASE`. |
+| `EANSEARCH_TOKEN` | unset | Adds EAN-Search.org (a paid API with wide European coverage; names only, no images) as the last lookup source, so its monthly quota is spent only on discs the free sources lack. Server-side only: the token never reaches the page or the phone. `EANSEARCH_BASE` points it at a mock in tests. |
 | `PUBLIC_URL` | derived from the request | Set when the app sits behind a proxy that hides the public host, so provider redirect URIs are right. |
 
 ## Deploy
@@ -92,6 +93,8 @@ A native shell lives in the separate `ios/Spine` Xcode project (WKWebView, camer
 
 The web app also installs straight from Safari: Share → Add to Home Screen. It runs full-screen with the tab bar, remembers sign-in, and the camera scanner works.
 
+Barcode lookups from the app go through a small native bridge, because UPCitemdb refuses cross-origin browser calls and rations a server's shared address: the page posts `{type: 'fetch', id, url}` to the `spine` message handler, Swift fetches the URL with URLSession (only `api.upcitemdb.com` and `world.openproductsfacts.org` are allowed) and calls `window.__spineFetch({id, status, body, error?, refused?})`. The shell's user agent ends in `SpineApp/1.3`; `public/js/bridge.js` treats 1.2 or later with the handler present as "native lookups on". Settings → This iPhone → *Barcode lookup diagnostics* shows that state, and *Test lookup* runs a lookup for a disc UPCitemdb knows and prints which side answered, each side's HTTP status and time, and the title it read. When nobody can answer, the scan row says which side failed; a phone timeout is never reported as the server's rate limit.
+
 ## How it's built
 
 ```
@@ -120,9 +123,11 @@ public/
   js/ui.js            components: posters, stars, rating input, cards, sheets
   js/forms.js         the log sheet, prompt sheet, copy and edition forms
   js/scan.js          barcode scanning (BarcodeDetector, ZXing, built-in decoder)
+  js/bridge.js        the iPhone shell: app version, message handler, native fetch
+  js/identify.js      barcode → product: the phone asks UPCitemdb first, the server second; names the side that failed
   js/views/           one module per page
-  sw.js               service worker
-test/                 api.test.js, viewing.test.js, scan.test.js
+  sw.js               service worker (bump V after changing anything under public/)
+test/                 api, lookup, identify, oauth, scan, letterboxd and viewing tests
 ```
 
 Ratings are stored as 1–10 (half stars). A diary entry (`watches`) carries `via` (where it was watched) and, for `dvd`, the `copy_id` and `edition_id` it was watched on. Imported entries carry `source` (`import:netflix`, `trakt:<id>`) and a `prompt_state` that drives the "rate it?" sheet.
