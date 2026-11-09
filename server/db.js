@@ -262,6 +262,25 @@ const MIGRATIONS = [
     SELECT r.user_id, e.film_id, substr(r.created_at, 1, 10), 'dvd', r.edition_id, r.rating * 2, r.body, r.created_at, r.updated_at
     FROM reviews r JOIN editions e ON e.id = r.edition_id;
   DROP TABLE reviews;
+  `,
+  // Third-party sign-in (Google, Apple). An account made through a provider has pass = '' until it sets one.
+  `
+  CREATE TABLE identities (
+    provider TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    email TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (provider, subject)
+  );
+  CREATE INDEX identities_user ON identities(user_id);
+  CREATE TABLE login_tokens (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL DEFAULT 'login',
+    expires INTEGER NOT NULL
+  );
+  CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `
 ];
 

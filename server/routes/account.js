@@ -31,7 +31,11 @@ export default function (r, { db, fail }) {
   r.delete('/api/me', ({ body, user, res }) => {
     requireUser(user);
     const u = db.prepare('SELECT pass, role FROM users WHERE id = ?').get(user.id);
-    if (!verifyPassword(String(body.password || ''), u.pass)) fail(400, 'Enter your password to confirm.');
+    if (u.pass) {
+      if (!verifyPassword(String(body.password || ''), u.pass)) fail(400, 'Enter your password to confirm.');
+    } else if (String(body.confirm || '').trim().toLowerCase() !== user.username.toLowerCase()) {
+      fail(400, 'Type your username to confirm.');
+    }
     if (u.role === 'admin' && db.prepare("SELECT count(*) n FROM users WHERE role = 'admin'").get().n === 1) {
       fail(409, 'You are the only admin. Make someone else an admin first.');
     }

@@ -4,7 +4,8 @@ const USERNAME = /^[a-zA-Z0-9_.-]{3,24}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function (r, { db, fail, rateLimit, secureCookies }) {
-  const publicUser = (u) => ({ id: u.id, username: u.username, display_name: u.display_name, email: u.email, role: u.role, bio: u.bio, public_collection: !!u.public_collection, public_diary: !!u.public_diary, prompt_reviews: !!u.prompt_reviews, theme: u.theme, favourites: JSON.parse(u.favourites || '[]'), created_at: u.created_at });
+  const publicUser = (u) => ({ id: u.id, username: u.username, display_name: u.display_name, email: u.email, role: u.role, bio: u.bio, public_collection: !!u.public_collection, public_diary: !!u.public_diary, prompt_reviews: !!u.prompt_reviews, theme: u.theme, favourites: JSON.parse(u.favourites || '[]'), created_at: u.created_at,
+    has_password: !!u.pass, logins: db.prepare('SELECT provider FROM identities WHERE user_id = ? ORDER BY created_at').all(u.id).map((x) => x.provider) });
 
   r.post('/api/auth/signup', ({ body, res, ip }) => {
     rateLimit(ip, 'signup', 10, 60 * 60e3);
@@ -29,6 +30,10 @@ export default function (r, { db, fail, rateLimit, secureCookies }) {
     rateLimit(ip, 'login', 20, 15 * 60e3);
     const id = String(body.login || '').trim();
     const u = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?').get(id, id);
+    if (u && !u.pass) {
+      const via = db.prepare('SELECT provider FROM identities WHERE user_id = ? ORDER BY created_at').all(u.id).map((x) => x.provider[0].toUpperCase() + x.provider.slice(1));
+      fail(401, `That account signs in with ${via.join(' or ') || 'a linked service'}. Use that button, or set a password from Settings once you are in.`);
+    }
     if (!u || !verifyPassword(String(body.password || ''), u.pass)) fail(401, 'That username or password is not right.');
     const s = createSession(db, u.id);
     res.setHeader('Set-Cookie', sessionCookie(s.token, s.expires, secureCookies));
@@ -88,7 +93,7 @@ export default function (r, { db, fail, rateLimit, secureCookies }) {
     }
     if (body.new_password) {
       const u = db.prepare('SELECT pass FROM users WHERE id = ?').get(user.id);
-      if (!verifyPassword(String(body.current_password || ''), u.pass)) fail(400, 'Your current password is not right.');
+      if (u.pass && !verifyPassword(String(body.current_password || ''), u.pass)) fail(400, 'Your current password is not right.');
       if (String(body.new_password).length < 8) fail(400, 'Use a new password of at least 8 characters.');
       db.prepare('UPDATE users SET pass = ? WHERE id = ?').run(hashPassword(String(body.new_password)), user.id);
     }

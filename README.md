@@ -33,6 +33,7 @@ Spine is a film diary in the Letterboxd mould, joined to a Discogs-style registe
 
 **App**
 - An Apple-style interface: system type, light and dark (follows the device or your choice), translucent bars, a bottom tab bar on phones.
+- Sign in with Google or Apple as well as a password; provider accounts can add a password later, and a member can link or unlink providers in Settings.
 - Installable on iPhone from Safari's share sheet ("Add to Home Screen"); the app shell works offline.
 - Accounts, password change, data export (JSON) and account deletion. The first account to sign up becomes the admin.
 
@@ -57,6 +58,9 @@ Demo sign-ins (password `spine-demo`): `demo` (admin, has a Netflix import waiti
 | `TMDB_API_KEY` | unset | Film lookup when adding editions (v3 key or v4 read token). |
 | `TRAKT_CLIENT_ID`, `TRAKT_CLIENT_SECRET` | unset | Turns on the Trakt connection. Create an app at trakt.tv/oauth/applications with redirect URI `https://your-host/api/streaming/trakt/callback`. |
 | `SECURE_COOKIES` | unset | Set to `1` when serving over HTTPS. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | unset | Turns on "Sign in with Google". Make an OAuth client (type: Web application) at console.cloud.google.com → APIs & Services → Credentials, with authorised redirect URI `https://your-host/api/auth/oauth/google/callback`. |
+| `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` | unset | Turns on "Sign in with Apple" (needs the Apple Developer Program). `APPLE_CLIENT_ID` is a Services ID with Sign in with Apple enabled and return URL `https://your-host/api/auth/oauth/apple/callback`; the key is a Sign in with Apple private key, pasted as PEM (`\n` escapes are fine). |
+| `PUBLIC_URL` | derived from the request | Set when the app sits behind a proxy that hides the public host, so provider redirect URIs are right. |
 
 ## Deploy
 

@@ -1,5 +1,5 @@
 // Spine service worker: network first, with the app shell and static files cached for offline opens.
-const V = 'spine-v3';
+const V = 'spine-v4';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (e) => {

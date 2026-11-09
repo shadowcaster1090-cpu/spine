@@ -11,6 +11,7 @@ import accountRoutes from './routes/account.js';
 import diaryRoutes from './routes/diary.js';
 import friendsRoutes from './routes/friends.js';
 import streamingRoutes from './routes/streaming.js';
+import oauthRoutes from './routes/oauth.js';
 import { editionMeta } from './catalogue.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -77,6 +78,8 @@ async function readBody(req, limit) {
   if (type.includes('application/json')) {
     try { return JSON.parse(raw); } catch { fail(400, 'The request body is not valid JSON.'); }
   }
+  // Sign in with Apple posts its result back as a form.
+  if (type.includes('application/x-www-form-urlencoded')) return Object.fromEntries(new URLSearchParams(raw));
   fail(415, 'Send requests as JSON.');
 }
 
@@ -93,7 +96,7 @@ export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, 
   fs.mkdirSync(uploadsDir, { recursive: true });
   const r = makeRouter();
   const ctx = { db, uploadsDir, tmdbKey, secureCookies, fail, rateLimit };
-  for (const reg of [authRoutes, catalogueRoutes, diaryRoutes, friendsRoutes, streamingRoutes, submissionRoutes, collectionRoutes, socialRoutes, accountRoutes]) reg(r, ctx);
+  for (const reg of [authRoutes, oauthRoutes, catalogueRoutes, diaryRoutes, friendsRoutes, streamingRoutes, submissionRoutes, collectionRoutes, socialRoutes, accountRoutes]) reg(r, ctx);
   const indexHtml = () => fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
 
   function send(res, status, body, headers = {}) {
@@ -153,8 +156,9 @@ export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, 
       if (!found) fail(404, 'No such endpoint.');
       if (found === 'method') fail(405, 'Method not allowed.');
 
-      // CSRF: state-changing requests must be same-origin JSON.
-      if (req.method !== 'GET') {
+      // CSRF: state-changing requests must be same-origin JSON. Sign-in providers post their result
+      // cross-site to the callback, which is protected by the signed state cookie instead.
+      if (req.method !== 'GET' && !/^\/api\/auth\/oauth\/[a-z]+\/callback\/?$/.test(pathname)) {
         const origin = req.headers.origin;
         if (origin && new URL(origin).host !== req.headers.host) fail(403, 'Cross-site request refused.');
       }

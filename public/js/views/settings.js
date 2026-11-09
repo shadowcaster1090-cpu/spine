@@ -1,5 +1,6 @@
-import { patch, del, get, me, loadMe } from '../api.js';
-import { esc, bindForm, toast, setTitle, field, area, poster, modal, $ } from '../ui.js';
+import { patch, del, get, post, me, loadMe } from '../api.js';
+import { esc, bindForm, toast, setTitle, field, area, poster, modal, confirmDialog, $ } from '../ui.js';
+import { startProviderSignIn } from '../oauth.js';
 
 export default async function view(ctx) {
   const { el, needLogin, go, refreshHeader } = ctx;
@@ -8,6 +9,10 @@ export default async function view(ctx) {
   const u = me.user;
   const favs = u.favourites.length ? (await get(`/api/users/${encodeURIComponent(u.username)}`)).favourites : [];
   const { applyTheme } = await import('../app.js');
+  const providers = await get('/api/auth/providers').then((r) => r.providers).catch(() => []);
+  const linked = (id) => u.logins.includes(id);
+  const PNAME = { google: 'Google', apple: 'Apple' };
+  if (ctx.query?.get('linked')) { toast(`${PNAME[ctx.query.get('linked')] || 'Account'} linked`); history.replaceState(null, '', '/settings'); }
 
   el.innerHTML = `<div class="wrap narrow"><div class="colhead"><div><div class="eyebrow">@${esc(u.username)}</div><h1 class="big">Settings</h1></div></div>
 
@@ -30,8 +35,13 @@ export default async function view(ctx) {
       <a class="row" href="/streaming"><span class="grow"><span class="t">Streaming services</span><span class="s">Connect Netflix, Prime Video or Trakt</span></span><span class="chev">›</span></a>
     </div>
 
+    ${providers.length || u.logins.length ? `<div class="group-title">Sign-in methods</div>
+    <div class="inset" id="logins">${[...new Set([...providers.map((p) => p.id), ...u.logins])].map((id) => `<div class="row"><span class="grow"><span class="t">${esc(PNAME[id] || id)}</span><span class="s">${linked(id) ? 'Linked · you can sign in with it' : 'Not linked'}</span></span>${linked(id) ? `<button type="button" class="btn sm" data-unlink="${id}">Unlink</button>` : `<button type="button" class="btn sm primary" data-link="${id}">Link</button>`}</div>`).join('')}</div>` : ''}
+
     <div class="group-title">Password</div>
-    <form class="inset" id="pw" style="padding:16px"><div class="form">${field('current_password', 'Current password', { type: 'password', attrs: 'required autocomplete="current-password"' })}${field('new_password', 'New password', { type: 'password', attrs: 'required minlength="8" autocomplete="new-password"', hint: 'At least 8 characters' })}<div class="err"></div><div><button class="btn primary" type="submit">Change password</button></div></div></form>
+    ${u.has_password
+      ? `<form class="inset" id="pw" style="padding:16px"><div class="form">${field('current_password', 'Current password', { type: 'password', attrs: 'required autocomplete="current-password"' })}${field('new_password', 'New password', { type: 'password', attrs: 'required minlength="8" autocomplete="new-password"', hint: 'At least 8 characters' })}<div class="err"></div><div><button class="btn primary" type="submit">Change password</button></div></div></form>`
+      : `<form class="inset" id="setpw" style="padding:16px"><p class="dim" style="font-size:14px;margin:0 0 12px">You sign in with ${u.logins.map((l) => PNAME[l] || l).join(' and ') || 'a linked service'}. A password lets you sign in without it too.</p><div class="form">${field('new_password', 'New password', { type: 'password', attrs: 'required minlength="8" autocomplete="new-password"', hint: 'At least 8 characters' })}<div class="err"></div><div><button class="btn primary" type="submit">Set a password</button></div></div></form>`}
 
     <div class="group-title">Your data</div>
     <div class="inset"><a class="row" href="/import"><span class="grow"><span class="t">Import from Letterboxd</span><span class="s">Bring your diary, ratings, reviews, likes and watchlist</span></span><span class="chev">›</span></a>
@@ -42,7 +52,7 @@ export default async function view(ctx) {
 
     <div class="group-title">Delete account</div>
     <form class="inset" id="delacc" style="padding:16px"><p class="dim" style="font-size:14px">This removes your account, diary, collection, wantlist, reviews and lists for good. Editions you added to the register stay, without your name.</p>
-      <div class="form" style="max-width:360px">${field('password', 'Password to confirm', { type: 'password', attrs: 'required autocomplete="current-password"' })}<div class="err"></div><div><button class="btn danger" type="submit">Delete my account</button></div></div></form>
+      <div class="form" style="max-width:360px">${u.has_password ? field('password', 'Password to confirm', { type: 'password', attrs: 'required autocomplete="current-password"' }) : field('confirm', 'Type your username to confirm', { attrs: 'required autocomplete="off" autocapitalize="none"' })}<div class="err"></div><div><button class="btn danger" type="submit">Delete my account</button></div></div></form>
     <div style="height:60px"></div></div>`;
 
   const paintFavs = () => {
@@ -58,8 +68,16 @@ export default async function view(ctx) {
   };
 
   bindForm($('#prof', el), async (v) => { await patch('/api/me', { display_name: v.display_name, bio: v.bio, email: v.email }); await loadMe(); refreshHeader(); toast('Profile saved'); });
-  bindForm($('#pw', el), async (v, f) => { await patch('/api/me', v); f.reset(); toast('Password changed'); });
-  bindForm($('#delacc', el), async (v) => { await del('/api/me', { password: v.password }); await loadMe(); refreshHeader(); toast('Your account has been deleted'); go('/'); });
+  if ($('#pw', el)) bindForm($('#pw', el), async (v, f) => { await patch('/api/me', v); f.reset(); toast('Password changed'); });
+  if ($('#setpw', el)) bindForm($('#setpw', el), async (v) => { await post('/api/me/password', v); await loadMe(); toast('Password set'); view(ctx); });
+  bindForm($('#delacc', el), async (v) => { await del('/api/me', u.has_password ? { password: v.password } : { confirm: v.confirm }); await loadMe(); refreshHeader(); toast('Your account has been deleted'); go('/'); });
+  $('#logins', el)?.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button'); if (!b) return;
+    if (b.dataset.link) return startProviderSignIn(b.dataset.link, { next: '/settings', link: true });
+    if (b.dataset.unlink && await confirmDialog(`Unlink ${PNAME[b.dataset.unlink] || b.dataset.unlink}? You will no longer be able to sign in with it.`, 'Unlink', true)) {
+      try { await del(`/api/me/logins/${b.dataset.unlink}`); await loadMe(); toast('Unlinked'); view(ctx); } catch (e) { toast(e.message, true); }
+    }
+  });
   el.querySelectorAll('[data-pref]').forEach((c) => c.onchange = async () => { try { await patch('/api/me', { [c.dataset.pref]: c.checked }); await loadMe(); toast('Saved'); } catch (e) { toast(e.message, true); c.checked = !c.checked; } });
   $('#theme', el).onclick = async (ev) => {
     const b = ev.target.closest('[data-t]'); if (!b) return;
