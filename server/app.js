@@ -13,6 +13,8 @@ import friendsRoutes from './routes/friends.js';
 import streamingRoutes from './routes/streaming.js';
 import oauthRoutes from './routes/oauth.js';
 import { editionMeta } from './catalogue.js';
+import { tmdbClient } from './tmdb.js';
+import { startPosterWorker } from './posters.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, '..', 'public');
@@ -92,8 +94,10 @@ export function rateLimit(ip, bucket, max, windowMs) {
   if (++e.n > max) fail(429, 'Too many attempts. Wait a few minutes and try again.');
 }
 
-export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, secureCookies = false }) {
+export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, secureCookies = false, background = false }) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+  // Long-running niceties (poster fetching) only in a real server process, never in tests.
+  if (background) startPosterWorker(db, tmdbClient(tmdbKey), uploadsDir);
   const r = makeRouter();
   const ctx = { db, uploadsDir, tmdbKey, secureCookies, fail, rateLimit };
   for (const reg of [authRoutes, oauthRoutes, catalogueRoutes, diaryRoutes, friendsRoutes, streamingRoutes, submissionRoutes, collectionRoutes, socialRoutes, accountRoutes]) reg(r, ctx);

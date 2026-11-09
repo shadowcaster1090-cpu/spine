@@ -4,6 +4,7 @@ import path from 'node:path';
 import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt, filmCards, searchFilms, filmsById, watchRows, findOrCreateFilm, cleanEdition, reindex, reindexFilm, setDirectors } from '../catalogue.js';
 import { tmdbClient, movieDetails, matchMovie, fetchImageToUploads, posterUrl, MAGIC } from '../tmdb.js';
 import { suggestFromBarcode } from '../lookup.js';
+import { backfillPosters } from '../posters.js';
 import { tx, v } from '../db.js';
 import { requireUser, requireMod, isMod } from '../auth.js';
 
@@ -304,32 +305,11 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
     return { id: Number(lastInsertRowid), file };
   });
 
-  // Admin: give existing films real posters (and TMDB ids, directors, synopses) from TMDB.
+  // Admin: give existing films real posters (and TMDB ids, directors, synopses) from TMDB. The server
+  // also does this by itself in the background; the button is for impatience.
   r.post('/api/admin/posters', async ({ user, body }) => {
     requireMod(user);
     if (!tmdbc.enabled) fail(501, 'Set TMDB_API_KEY on the server first.');
-    const limit = Math.min(+body.limit || 40, 100);
-    const rows = db.prepare("SELECT id, title, year, tmdb_id, poster_path FROM films WHERE poster = '' ORDER BY id LIMIT ?").all(limit);
-    let done = 0, matched = 0, missed = [];
-    for (const f of rows) {
-      try {
-        let details = null;
-        if (f.tmdb_id) details = await movieDetails(tmdbc, f.tmdb_id);
-        else {
-          const m = await matchMovie(tmdbc, f.title, f.year);
-          if (m) { details = await movieDetails(tmdbc, m.tmdb_id); matched++; }
-        }
-        if (!details) { missed.push(f.title); continue; }
-        const dup = db.prepare('SELECT id FROM films WHERE tmdb_id = ? AND id != ?').get(details.tmdb_id, f.id);
-        const file = details.poster_path ? await fetchImageToUploads(posterUrl(details.poster_path, 'w780'), uploadsDir) : null;
-        db.prepare(`UPDATE films SET poster = coalesce(?, poster), poster_path = ?, tmdb_id = coalesce(tmdb_id, ?), synopsis = CASE WHEN synopsis = '' THEN ? ELSE synopsis END,
-          runtime = coalesce(runtime, ?), country = CASE WHEN country = '' THEN ? ELSE country END, language = CASE WHEN language = '' THEN ? ELSE language END, original_title = CASE WHEN original_title = '' THEN ? ELSE original_title END WHERE id = ?`)
-          .run(file, details.poster_path, dup ? null : details.tmdb_id, details.synopsis, v(details.runtime), details.country, details.language, details.original_title, f.id);
-        if (!db.prepare('SELECT 1 FROM film_directors WHERE film_id = ?').get(f.id) && details.directors.length) { setDirectors(db, f.id, details.directors); reindexFilm(db, f.id); }
-        done++;
-      } catch (e) { missed.push(`${f.title} (${e.message})`); }
-    }
-    const remaining = db.prepare("SELECT count(*) n FROM films WHERE poster = ''").get().n;
-    return { done, matched, missed, remaining };
+    return backfillPosters(db, tmdbc, uploadsDir, { limit: Math.min(+body.limit || 40, 100), retryMisses: !!body.retry });
   });
 }
