@@ -33,16 +33,27 @@ const serverTrouble = (err) => (/rate limit|429/i.test(err) ? "UPCitemdb has use
 
 const firstItem = (text) => { const data = JSON.parse(text || '{}'); return (data.items || [])[0] || null; };
 
-// Resolves to the server's reading ({product, parsed, film, hint, …} plus `via`: 'phone' | 'browser' | 'server'),
+// Resolves to the server's reading ({product, parsed, film, hint, …} plus `via`: 'spine' | 'phone' | 'browser' | 'server'),
 // or to {product: null, trouble, side} when nobody could answer, `side` naming who failed ('phone', 'server'
 // or 'both'). `diag` records what each side did, for the Settings diagnostics row.
+// Spine's own barcode records are asked first: a disc looked up once (found, or known to no source) never costs
+// an outside lookup again. ownFirst: false skips them, so the diagnostics row always exercises the phone.
 export async function identify(code, deps = {}) {
-  const { get = apiGet, post = apiPost, canNative = bridgeCan, native = bridgeFetch, fetchImpl = globalThis.fetch?.bind(globalThis), timeout = PHONE_TIMEOUT } = deps;
+  const { get = apiGet, post = apiPost, canNative = bridgeCan, native = bridgeFetch, fetchImpl = globalThis.fetch?.bind(globalThis), timeout = PHONE_TIMEOUT, ownFirst = true } = deps;
   const t0 = now();
-  const diag = { code, phone: null, browser: null, server: null };
+  const diag = { code, own: null, phone: null, browser: null, server: null };
   const done = (r) => ({ ...r, diag: { ...diag, via: r.via || '', ms: Math.round(now() - t0) } });
   const url = UPC_TRIAL + encodeURIComponent(code);
   let asked = '', item = null, saidUnknown = false, trouble = '';
+
+  if (ownFirst) {
+    const t = now();
+    try {
+      const own = await get(`/api/barcode/${code}/lookup?cached=1`);
+      diag.own = { status: 200, ms: Math.round(now() - t), known: !!own.known };
+      if (own.known) return done({ ...own, via: 'spine' });   // a product, or a disc no source has: answered from Spine
+    } catch (e) { diag.own = { status: e.status ?? 0, ms: Math.round(now() - t), error: e.message }; }   // carry on outside
+  }
 
   if (canNative()) {
     asked = 'phone';
@@ -78,10 +89,11 @@ export async function identify(code, deps = {}) {
     }
   }
 
-  // Nothing from the phone: the server tries its own sources (and its memory of earlier lookups).
+  // Nothing from the phone: the server tries its own sources. When UPCitemdb has just said "no items", the server
+  // skips it, so a clean answer from the rest is remembered as a disc no source has.
   const t = now();
   let s;
-  try { s = await get(`/api/barcode/${code}/lookup`); }
+  try { s = await get(`/api/barcode/${code}/lookup${saidUnknown ? '?upcitemdb=none' : ''}`); }
   catch (e) {
     diag.server = { step: 'lookup', status: e.status ?? 0, ms: Math.round(now() - t), error: e.message };
     if (saidUnknown) return done({ product: null, via: asked });
