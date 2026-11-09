@@ -60,11 +60,13 @@ export const I = {
 
 /* ---------- avatars ---------- */
 function hash(s) { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; }
+// Warm darkroom tones for member avatars, picked by a hash of the username.
+const AVATAR_TONES = [['#8a3b2a', '#4d1e16'], ['#5f6b3a', '#2f3a1c'], ['#3b5a73', '#1f3243'], ['#7a5a2b', '#4a3414'], ['#6b3a5b', '#3a1f32'], ['#2f6f6a', '#183b38'], ['#8a6a3a', '#4a3a1a'], ['#4a4a4a', '#262626'], ['#9a4a2a', '#5a2a14'], ['#3d4a6b', '#20283a']];
 export function avatar(u, cls = '') {
   const name = typeof u === 'string' ? u : (u?.username || '?');
-  const h = hash(name), a = h % 360, b = (a + 40 + (h >> 8) % 60) % 360;
+  const [a, b] = AVATAR_TONES[hash(name) % AVATAR_TONES.length];
   const label = (typeof u === 'object' && u?.display_name) || name;
-  return `<span class="avatar ${cls}" style="--av-a:hsl(${a} 55% 55%);--av-b:hsl(${b} 60% 40%)" title="${esc(label)}" aria-hidden="true">${esc(label.trim()[0] || '?')}</span>`;
+  return `<span class="avatar ${cls}" style="--av-a:${a};--av-b:${b}" title="${esc(label)}" aria-hidden="true">${esc(label.trim()[0] || '?')}</span>`;
 }
 export const nameOf = (u) => u?.display_name || u?.username || '';
 
@@ -123,18 +125,18 @@ function art(e, w, h) {
     case 8: for (let i = 0; i < 9; i++) s += `<line x1="${w * .08 + i * w * .105}" y1="${h * .06}" x2="${w * .08 + i * w * .105}" y2="${h * .72}" stroke="${i === 4 ? ac : fg}" stroke-width="${i === 4 ? 10 : 2 + (i % 3)}" opacity="${i === 4 ? 1 : .8}"/>`; break;
     default: s = `<path d="M0 ${h * .62} C ${w * .3} ${h * .3}, ${w * .6} ${h * .85}, ${w} ${h * .4} L ${w} ${h * .75} L 0 ${h * .75} Z" fill="${ac}"/><circle cx="${w * .72}" cy="${h * .2}" r="${w * .09}" fill="${fg}"/>`;
   }
-  const lines = wrapT(e.title, 11), ml = Math.max(...lines.map((l) => l.length)), fs = Math.min(w * .18, (w * .88) / (ml * .5), lines.length > 2 ? w * .13 : w * .18);
-  const tt = lines.map((l, i) => `<text x="${w * .07}" y="${(h * .9 - (lines.length - 1 - i) * fs * 1).toFixed(1)}" font-family="-apple-system, system-ui, Helvetica, Arial, sans-serif" font-weight="700" letter-spacing="-.5" font-size="${fs.toFixed(1)}" fill="${fg}">${esc(l)}</text>`).join('');
+  const lines = wrapT(e.title, 11), ml = Math.max(...lines.map((l) => l.length)), fs = Math.min(w * .19, (w * .86) / (ml * .5), lines.length > 2 ? w * .14 : w * .19);
+  const tt = lines.map((l, i) => `<text x="${w * .07}" y="${(h * .9 - (lines.length - 1 - i) * fs * 1).toFixed(1)}" font-family="Instrument Serif, Georgia, serif" font-style="italic" font-weight="400" font-size="${fs.toFixed(1)}" fill="${fg}">${esc(l)}</text>`).join('');
   const dir = (e.directors || []).map((d) => d.name).join(' & ');
   return { bg, fg, body: s, text: tt, dir };
 }
 export function coverSvg(e) {
   const a = art(e, 200, 284);
-  return `<svg viewBox="0 0 200 284" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="200" height="284" fill="${a.bg}"/>${a.body}<rect width="200" height="18" fill="#000" opacity=".25"/><text x="9" y="12" font-family="ui-monospace, Menlo, monospace" font-size="6.6" letter-spacing=".8" fill="${a.fg}">${esc((e.label || '').toUpperCase().slice(0, 28))}</text>${e.spine_no != null ? `<text x="191" y="12" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="6.6" fill="${a.fg}">No. ${pad(e.spine_no)}</text>` : ''}${a.text}<text x="14" y="276" font-family="ui-monospace, Menlo, monospace" font-size="6.2" letter-spacing="1" fill="${a.fg}" opacity=".75">${esc(a.dir.toUpperCase().slice(0, 34))}${e.year ? ' · ' + e.year : ''}</text></svg>`;
+  return `<svg viewBox="0 0 200 284" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="200" height="284" fill="${a.bg}"/>${a.body}<rect width="200" height="18" fill="#000" opacity=".25"/><text x="9" y="12" font-family="IBM Plex Mono, Menlo, monospace" font-size="6.6" letter-spacing=".8" fill="${a.fg}">${esc((e.label || '').toUpperCase().slice(0, 28))}</text>${e.spine_no != null ? `<text x="191" y="12" text-anchor="end" font-family="IBM Plex Mono, Menlo, monospace" font-size="6.6" fill="${a.fg}">No. ${pad(e.spine_no)}</text>` : ''}${a.text}<text x="14" y="276" font-family="IBM Plex Mono, Menlo, monospace" font-size="6.2" letter-spacing="1" fill="${a.fg}" opacity=".75">${esc(a.dir.toUpperCase().slice(0, 34))}${e.year ? ' · ' + e.year : ''}</text></svg>`;
 }
 export function posterSvg(f) {
   const a = art(f, 200, 300);
-  return `<svg viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="200" height="300" fill="${a.bg}"/>${a.body}${a.text}<text x="14" y="292" font-family="-apple-system, system-ui, Helvetica, Arial, sans-serif" font-size="7" letter-spacing=".6" fill="${a.fg}" opacity=".7">${esc(a.dir.toUpperCase().slice(0, 34))}${f.year ? ' · ' + f.year : ''}</text></svg>`;
+  return `<svg viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="200" height="300" fill="${a.bg}"/>${a.body}${a.text}<text x="14" y="292" font-family="IBM Plex Mono, Menlo, monospace" font-size="6.4" letter-spacing="1" fill="${a.fg}" opacity=".75">${esc(a.dir.toUpperCase().slice(0, 34))}${f.year ? ' · ' + f.year : ''}</text></svg>`;
 }
 export function cover(e, cls = '') {
   if (e.cover) return `<div class="cv ${cls}"><img src="/uploads/${esc(e.cover)}" alt="${esc(e.title)} cover" loading="lazy"></div>`;

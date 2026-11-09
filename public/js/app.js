@@ -36,7 +36,7 @@ const ROUTES = [
   [/^\/(login|signup)$/, 'auth', ['mode']],
   [/^\/(about|privacy|terms|guidelines)$/, 'pages', ['page']]
 ];
-const NAV = { home: 'home', films: 'films', film: 'films', person: 'films', browse: 'browse', release: 'browse', labels: 'browse', label: 'browse', lists: 'lists', list: 'lists', friends: 'friends', review: 'friends', scan: 'scan', add: 'scan' };
+const NAV = { home: 'home', films: 'films', film: 'films', person: 'films', browse: 'browse', release: 'browse', labels: 'browse', label: 'browse', lists: 'lists', list: 'lists', friends: 'friends', review: 'friends', scan: 'collection', add: 'collection', streaming: 'me', settings: 'me', notifications: 'me', import: 'me' };
 
 const main = $('#app');
 let cleanup = null, seq = 0;
@@ -95,10 +95,11 @@ export function refreshHeader() {
   const badge = me.unread + (isMod() ? me.pending : 0);
   box.innerHTML = `
     <button class="btn sm primary" id="logbtn" aria-label="Log a film">${I.plus}<span>Log</span></button>
-    <a class="iconbtn" href="/notifications" aria-label="Notifications${me.unread ? `, ${me.unread} unread` : ''}">${I.bell}${badge ? `<span class="dot">${badge > 99 ? '99+' : badge}</span>` : ''}</a>
-    <div class="menu" id="umenu"><button class="avatar" aria-haspopup="true" aria-expanded="false" aria-label="Account menu" style="${avatarStyle(u.username)}">${esc((u.display_name || u.username)[0])}</button>
+    <a class="iconbtn hide-m" href="/notifications" aria-label="Notifications${me.unread ? `, ${me.unread} unread` : ''}">${I.bell}${badge ? `<span class="dot">${badge > 99 ? '99+' : badge}</span>` : ''}</a>
+    <div class="menu" id="umenu"><button class="avatar" aria-haspopup="true" aria-expanded="false" aria-label="Account menu" style="${avatarStyle(u.username)}">${esc((u.display_name || u.username)[0])}${badge ? `<span class="dot show-m">${badge > 99 ? '99+' : badge}</span>` : ''}</button>
       <div class="menu-pop" role="menu">
         <a href="/u/${esc(u.username)}"><span>Profile</span><span class="dim2">${esc(u.username)}</span></a>
+        <a href="/notifications">Notifications${me.unread ? `<span class="pill accent">${me.unread}</span>` : ''}</a>
         <a href="/diary">Diary</a><a href="/collection">Shelf</a><a href="/watchlist">Watchlist</a><a href="/wantlist">Wantlist</a>
         <hr><a href="/scan">Scan discs</a><a href="/add">Add an edition</a><a href="/streaming">Streaming services${me.prompts ? `<span class="pill accent">${me.prompts}</span>` : ''}</a><a href="/import">Import from Letterboxd</a><a href="/contributions">Contributions</a>
         ${isMod() ? `<a href="/mod">Moderation ${me.pending ? `<span class="pill accent">${me.pending}</span>` : ''}</a>` : ''}
@@ -147,10 +148,10 @@ $('#search').addEventListener('submit', (ev) => {
 });
 
 export function applyTheme(t) {
-  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme');
+  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light'); else document.documentElement.removeAttribute('data-theme');
   try { localStorage.setItem('spine-theme', t || 'system'); } catch { /* ignore */ }
   // The iPhone shell matches its status bar to the theme.
-  try { window.webkit?.messageHandlers?.spine?.postMessage({ type: 'theme', value: t || 'system' }); } catch { /* not in the app */ }
+  try { window.webkit?.messageHandlers?.spine?.postMessage({ type: 'theme', value: t === 'light' ? 'light' : 'dark' }); } catch { /* not in the app */ }
 }
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

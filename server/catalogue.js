@@ -100,14 +100,20 @@ export function cleanLabel(input, partial = false) {
 export const barcodeAlt = (c) => (c.length === 12 ? '0' + c : c.length === 13 && c.startsWith('0') ? c.slice(1) : c);
 
 /* ---------- palette for generated covers ---------- */
+// Film-stock palettes: [background, type, accent]. Picked by a hash of the title so a film keeps its look.
+export const PALETTES = [
+  ['#4d0d12', '#f1d9b5', '#c8902e'], ['#3b3a22', '#e6dfc4', '#a7a35a'], ['#0f3b3f', '#f2e3c6', '#d3402c'], ['#e9e1cf', '#1c1b18', '#9b2b20'],
+  ['#d7d4cc', '#121212', '#6d6d6d'], ['#183b2a', '#f4e04d', '#ef5a3c'], ['#141414', '#f0ece4', '#b9b9b9'], ['#0f1430', '#e9d9f3', '#7f6bd4'],
+  ['#1b1a17', '#efe7d5', '#b5281d'], ['#202020', '#f3efe5', '#d6b25e'], ['#f1ece1', '#141414', '#cf2b2b'], ['#28394a', '#f2ead8', '#e4a23f'],
+  ['#f0e8da', '#1a1714', '#d4566b'], ['#151515', '#ece6d8', '#8c8c8c'], ['#123c45', '#dfeee9', '#c2a14b'], ['#d5c7a4', '#1d2a33', '#2f6f8f'],
+  ['#3a2f24', '#efe2c8', '#d78b3a'], ['#1d1f22', '#dfd8c8', '#5f7f8a'], ['#151012', '#f4dc6a', '#d23b2e'], ['#ece3cc', '#22201b', '#a5672e'],
+  ['#6f7d6a', '#f1ece0', '#2a2a27'], ['#2a0b0e', '#f6e6cf', '#e0322f'], ['#0d0d0d', '#e2e2e2', '#555555'], ['#3c2b14', '#f1d07b', '#2b8a8a'],
+  ['#2b2f4a', '#efe4d2', '#d98e4a'], ['#5a2a1a', '#f3e2c9', '#e0b34a'], ['#1f2d24', '#e8e2d0', '#c84a3a'], ['#e5dccb', '#2a2320', '#3f6a8a']
+];
 export function paletteFor(seed) {
   let h = 2166136261;
   for (const c of String(seed)) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  h >>>= 0;
-  const hue = h % 360, shift = 30 + (h >> 9) % 150, light = (h >> 4) % 4 === 0;
-  return light
-    ? [`hsl(${hue} 22% 88%)`, `hsl(${hue} 20% 12%)`, `hsl(${(hue + shift) % 360} 62% 46%)`]
-    : [`hsl(${hue} 34% 17%)`, `hsl(${hue} 30% 89%)`, `hsl(${(hue + shift) % 360} 58% 56%)`];
+  return PALETTES[(h >>> 0) % PALETTES.length];
 }
 
 /* ---------- reads ---------- */

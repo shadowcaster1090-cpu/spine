@@ -84,8 +84,8 @@ export function feedItem(x) {
 function landing(el, d) {
   el.innerHTML = `<div class="wrap">
     <section class="landing">
-      <div class="eyebrow">For people who still buy the disc</div>
-      <h1>Every film you’ve watched.<br>Every disc you own.</h1>
+      <div class="eyebrow">Spine · The DVD register</div>
+      <h1>Every film you’ve watched<i>.</i><br>Every disc you own<i>.</i></h1>
       <p>Spine is a diary for films and a register for DVD editions. Log what you watch, note whether it was your own copy, follow friends, and keep the shelf in your pocket.</p>
       <div class="btns" style="justify-content:center"><a class="btn primary lg" href="/signup">Create an account</a><a class="btn lg" href="/films">Browse films</a></div>
     </section>

@@ -281,6 +281,10 @@ const MIGRATIONS = [
     expires INTEGER NOT NULL
   );
   CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `,
+  // Generated cover palettes moved to a curated film-stock set; stored palettes fall back to the generator on read.
+  `
+  UPDATE films SET palette = NULL;
   `
 ];
 

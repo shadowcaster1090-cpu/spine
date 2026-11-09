@@ -25,7 +25,7 @@ export default async function view(ctx) {
     <div class="inset" style="padding:16px"><div class="favs" id="favs"></div><p class="group-note" style="margin:10px 0 0">Four films that say who you are. They sit at the top of your profile.</p></div>
 
     <div class="group-title">Appearance</div>
-    <div class="inset"><div class="row"><span class="grow"><span class="t">Theme</span><span class="s">System follows your device</span></span><div class="seg" id="theme">${[['system', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) => `<button type="button" data-t="${v}" class="${(u.theme || 'system') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div></div>
+    <div class="inset"><div class="row"><span class="grow"><span class="t">Theme</span><span class="s">Dark is the house style; Paper is an ivory variant for daylight</span></span><div class="seg" id="theme">${[['dark', 'Dark'], ['light', 'Paper']].map(([v, l]) => `<button type="button" data-t="${v}" class="${(u.theme === 'light' ? 'light' : 'dark') === v ? 'on' : ''}">${l}</button>`).join('')}</div></div></div>
 
     <div class="group-title">Privacy & prompts</div>
     <div class="inset">
