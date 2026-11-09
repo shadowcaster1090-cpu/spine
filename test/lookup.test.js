@@ -159,3 +159,15 @@ test('the poster backfill matches bare films on TMDB and stores their posters', 
   assert.equal(stalker.tmdb_id, 1398); assert.ok(stalker.poster); assert.equal(stalker.poster_path, '/stalker.jpg');
   assert.equal(db.prepare("SELECT count(*) n FROM film_directors fd JOIN films f ON f.id = fd.film_id WHERE f.title = 'Stalker'").get().n, 1);
 });
+
+test('barcode hints: GS1 prefix gives the label and region for discs no database knows', async () => {
+  const { hintFromBarcode, labelFromBarcode } = await import('../server/lookup.js');
+  assert.equal(labelFromBarcode('5051429990422'), 'Entertainment One');
+  assert.equal(labelFromBarcode('5051892251990'), 'Warner Bros.');
+  assert.equal(labelFromBarcode('5055761913446'), 'Lionsgate');
+  assert.equal(labelFromBarcode('715515123456'), 'The Criterion Collection');   // 12-digit UPC
+  assert.equal(labelFromBarcode('9999999999999'), '');
+  const h = hintFromBarcode('5051429990422');
+  assert.equal(h.region, '2');
+  assert.equal(h.standard, 'PAL');
+});

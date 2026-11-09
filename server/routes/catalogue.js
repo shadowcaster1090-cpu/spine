@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt, filmCards, searchFilms, filmsById, watchRows, findOrCreateFilm, cleanEdition, reindex, reindexFilm, setDirectors } from '../catalogue.js';
 import { tmdbClient, movieDetails, matchMovie, fetchImageToUploads, posterUrl, MAGIC } from '../tmdb.js';
-import { suggestFromBarcode, suggestFromProduct, acceptClientProduct } from '../lookup.js';
+import { suggestFromBarcode, suggestFromProduct, acceptClientProduct, hintFromBarcode } from '../lookup.js';
 import { backfillPosters } from '../posters.js';
 import { tx, v } from '../db.js';
 import { requireUser, requireMod, isMod } from '../auth.js';
@@ -57,7 +57,7 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
     const alt = barcodeAlt(code);
     // Also report a pending submission with this barcode, so scanners don't add the same disc twice.
     const pending = db.prepare("SELECT id, user_id FROM submissions WHERE status = 'pending' AND kind = 'edition' AND json_extract(payload, '$.barcode') IN (?, ?) ORDER BY id LIMIT 1").get(code, alt);
-    return { code, items: cards(db, 'e.barcode IN (?, ?)', [code, alt], 'e.id', 20), pending: pending ? { id: pending.id, mine: !!user && pending.user_id === user.id } : null };
+    return { code, items: cards(db, 'e.barcode IN (?, ?)', [code, alt], 'e.id', 20), pending: pending ? { id: pending.id, mine: !!user && pending.user_id === user.id } : null, hint: hintFromBarcode(code) };
   });
 
   r.get('/api/films', ({ query }) => {
@@ -208,11 +208,12 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
     const code = params.code.replace(/\D/g, '');
     if (code.length < 8 || code.length > 14) fail(400, 'A barcode is 8 to 14 digits.');
     const s = await suggestFromBarcode(db, tmdbc, code, { force: query.get('force') === '1' && isMod(user) });
+    if (s.parsed && !s.parsed.label) s.parsed.label = hintFromBarcode(code).label;
     let existing = null;
     if (s.film?.tmdb_id) existing = db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(s.film.tmdb_id)?.id || null;
     if (!existing && s.parsed?.title) existing = db.prepare('SELECT id FROM films WHERE title = ? COLLATE NOCASE AND (? IS NULL OR year IS NULL OR year = ?)').get(s.parsed.title, v(s.parsed.year), v(s.parsed.year))?.id || null;
     return {
-      code, ...s, tmdb: tmdbc.enabled, existing_film_id: existing,
+      code, ...s, tmdb: tmdbc.enabled, existing_film_id: existing, hint: hintFromBarcode(code),
       film: s.film ? { ...s.film, poster_url: posterUrl(s.film.poster_path, 'w342') } : null
     };
   });
@@ -226,10 +227,11 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
     const product = acceptClientProduct(db, code, body.product);
     if (!product) fail(400, 'No product details to read.');
     const s = await suggestFromProduct(db, tmdbc, code, product);
+    if (s.parsed && !s.parsed.label) s.parsed.label = hintFromBarcode(code).label;
     let existing = null;
     if (s.film?.tmdb_id) existing = db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(s.film.tmdb_id)?.id || null;
     if (!existing && s.parsed?.title) existing = db.prepare('SELECT id FROM films WHERE title = ? COLLATE NOCASE AND (? IS NULL OR year IS NULL OR year = ?)').get(s.parsed.title, v(s.parsed.year), v(s.parsed.year))?.id || null;
-    return { code, ...s, tmdb: tmdbc.enabled, existing_film_id: existing, film: s.film ? { ...s.film, poster_url: posterUrl(s.film.poster_path, 'w342') } : null };
+    return { code, ...s, tmdb: tmdbc.enabled, existing_film_id: existing, hint: hintFromBarcode(code), film: s.film ? { ...s.film, poster_url: posterUrl(s.film.poster_path, 'w342') } : null };
   });
 
   // Creates the film (from TMDB or the given fields) and the edition in one go, with the retailer's cover

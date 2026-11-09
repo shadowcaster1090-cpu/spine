@@ -139,6 +139,32 @@ const NOISE = [
 ];
 const LABEL_WORDS = /\b(the criterion collection|criterion collection|criterion|arrow|eureka|kino|shout|masters of cinema|arrow video|arrow academy|arrow films|studio ?canal|warner (bros\.?|brothers|home video|archive)|sony pictures( home entertainment)?|columbia tristar|20th century fox|twentieth century fox|walt disney|buena vista|universal (pictures|studios)|paramount( pictures)?|kino lorber|shout! factory|scream factory|vinegar syndrome|second sight|indicator|powerhouse films|bfi|eureka( entertainment)?|artificial eye|curzon|optimum( releasing| home entertainment)?|momentum pictures|entertainment in video|tartan( video)?|anchor bay|lions ?gate|network|88 films|radiance films|severin|dogwoof|fabulous films|signal one|metrodome|mgm|hbo|bbc)\b/gi;
 
+// GS1 company prefixes of home-video distributors: even a disc no database knows tells us its label.
+// Prefixes are as printed on EAN-13s (US UPCs with a leading 0). Confident entries only; the member can change it.
+export const COMPANY_PREFIXES = [
+  ['0715515', 'The Criterion Collection'], ['0025192', 'Universal'], ['0025193', 'Universal'], ['0043396', 'Sony Pictures'], ['0883929', 'Warner Bros.'],
+  ['0085391', 'Warner Bros.'], ['0012569', 'Warner Bros.'], ['0097361', 'Paramount'], ['0032429', 'Paramount'], ['0024543', '20th Century Fox'],
+  ['0786936', 'Disney'], ['0031398', 'Lionsgate'], ['0738329', 'Kino Lorber'], ['0826663', 'Shout! Factory'], ['0012236', 'MGM'], ['0027616', 'MGM'],
+  ['5050582', 'Universal'], ['5053083', 'Universal'], ['5050629', 'Sony Pictures'], ['5035822', 'Sony Pictures'], ['5051892', 'Warner Bros.'], ['7321900', 'Warner Bros.'],
+  ['5055761', 'Lionsgate'], ['5060052', 'Lionsgate'], ['5051429', 'Entertainment One'], ['5039036', 'Entertainment in Video'], ['5035673', 'BFI'],
+  ['5027035', 'Arrow Video'], ['5014437', 'Paramount'], ['5017188', 'Paramount'], ['5055201', 'Arrow Video'], ['5060105', 'Second Sight'], ['5028836', 'Second Sight'],
+  ['5060000', 'Eureka Entertainment'], ['5055744', 'Eureka Entertainment'], ['5021866', 'Network'], ['5027182', 'Dogwoof'], ['5060697', 'Indicator'], ['5037899', 'StudioCanal'],
+  ['5055201', 'Arrow Video'], ['5019322', 'Momentum Pictures'], ['5036193', 'Artificial Eye'], ['5021866', 'Network'], ['5060352', 'Arrow Video'], ['8717418', 'Universal'],
+  ['9398700', 'Universal'], ['9397810', 'Warner Bros.'], ['9321337', 'Umbrella Entertainment'], ['4010232', 'Universal'], ['4011976', 'Warner Bros.'], ['4030521', 'Sony Pictures']
+];
+export function labelFromBarcode(code) {
+  const c = String(code).replace(/\D/g, '');
+  const ean = c.length === 12 ? '0' + c : c;
+  const hit = COMPANY_PREFIXES.find(([p]) => ean.startsWith(p));
+  return hit ? hit[1] : '';
+}
+
+// What the barcode alone says about a disc, for prefilling a manual add.
+export function hintFromBarcode(code) {
+  const { region, standard } = regionFromBarcode(code);
+  return { label: labelFromBarcode(code), region, standard };
+}
+
 export function regionFromBarcode(code) {
   const c = String(code).replace(/\D/g, '');
   const ean = c.length === 12 ? '0' + c : c;
