@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt, filmCards, searchFilms, filmsById, watchRows, findOrCreateFilm, cleanEdition, reindex, reindexFilm, setDirectors } from '../catalogue.js';
 import { tmdbClient, movieDetails, matchMovie, fetchImageToUploads, posterUrl, MAGIC } from '../tmdb.js';
-import { suggestFromBarcode, suggestFromProduct, acceptClientProduct, hintFromBarcode } from '../lookup.js';
+import { suggestFromBarcode, suggestFromProduct, acceptClientProduct, hintFromBarcode, barcodeStats, exportBarcodes, importBarcodes } from '../lookup.js';
+import { parseCsv, toCsv } from '../csv.js';
 import { backfillPosters } from '../posters.js';
 import { tx, v } from '../db.js';
 import { requireUser, requireMod, isMod } from '../auth.js';
@@ -201,13 +202,16 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
   });
 
   /* ---------- barcode lookup: product services + TMDB, then one tap to the register ---------- */
+  // ?cached=1 answers from Spine's own barcode records only (no outside lookup, so a far wider allowance);
+  // ?upcitemdb=none says the phone has just been told "no items" by UPCitemdb, so the server doesn't ask it again.
   r.get('/api/barcode/:code/lookup', async ({ params, query, user, ip }) => {
     requireUser(user);
-    rateLimit(String(user.id), 'lookup', 120, 60 * 60e3);
-    rateLimit(ip, 'lookup-ip', 300, 60 * 60e3);
+    const cachedOnly = query.get('cached') === '1';
+    if (cachedOnly) rateLimit(String(user.id), 'lookup-own', 1200, 60 * 60e3);
+    else { rateLimit(String(user.id), 'lookup', 120, 60 * 60e3); rateLimit(ip, 'lookup-ip', 300, 60 * 60e3); }
     const code = params.code.replace(/\D/g, '');
     if (code.length < 8 || code.length > 14) fail(400, 'A barcode is 8 to 14 digits.');
-    const s = await suggestFromBarcode(db, tmdbc, code, { force: query.get('force') === '1' && isMod(user) });
+    const s = await suggestFromBarcode(db, tmdbc, code, { force: query.get('force') === '1' && isMod(user), cachedOnly, skip: query.get('upcitemdb') === 'none' ? ['upcitemdb'] : [] });
     if (s.parsed && !s.parsed.label) s.parsed.label = hintFromBarcode(code).label;
     let existing = null;
     if (s.film?.tmdb_id) existing = db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(s.film.tmdb_id)?.id || null;
@@ -286,6 +290,22 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
     if (posterFile) db.prepare('UPDATE films SET poster = ? WHERE id = ?').run(posterFile, filmId);
     const copy = body.add_to === 'shelf' ? db.prepare('SELECT * FROM copies WHERE user_id = ? AND edition_id = ? ORDER BY id DESC').get(user.id, editionId) : null;
     return { edition: cards(db, 'e.id = ?', [editionId], 'e.id', 1)[0], film_id: filmId, film_created: created, copy, cover: !!coverFile, poster: !!posterFile };
+  });
+
+  /* ---------- Spine's barcode database, to keep on your own computer and load from it (moderators) ---------- */
+  r.get('/api/barcodes/stats', ({ user }) => { requireMod(user); return barcodeStats(db); });
+
+  r.get('/api/barcodes/export.csv', ({ user }) => {
+    requireMod(user);
+    return { __raw: true, body: toCsv(exportBarcodes(db)), headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="spine-barcodes.csv"', 'Cache-Control': 'no-store' } };
+  });
+
+  r.post('/api/barcodes/import', ({ body, user }) => {
+    requireMod(user);
+    const text = String(body.csv || '');
+    if (!text.trim()) fail(400, 'That file is empty.');
+    const result = tx(db, () => importBarcodes(db, parseCsv(text)));
+    return { ...result, stats: barcodeStats(db) };
   });
 
   // Previews of artwork the lookup found, before anything is saved. Only URLs that a provider or TMDB
