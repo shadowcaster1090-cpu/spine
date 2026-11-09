@@ -149,6 +149,8 @@ $('#search').addEventListener('submit', (ev) => {
 export function applyTheme(t) {
   if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme');
   try { localStorage.setItem('spine-theme', t || 'system'); } catch { /* ignore */ }
+  // The iPhone shell matches its status bar to the theme.
+  try { window.webkit?.messageHandlers?.spine?.postMessage({ type: 'theme', value: t || 'system' }); } catch { /* not in the app */ }
 }
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

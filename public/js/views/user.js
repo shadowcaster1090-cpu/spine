@@ -32,6 +32,7 @@ export default async function view(ctx) {
     </div>
     <nav class="tabsbar">${TABS.filter(([v]) => !(v === 'wants' && !own && !u.public_collection)).map(([v, l]) => `<a href="${v === 'overview' ? base : base + '/' + v}" class="${tab === v ? 'on' : ''}">${l}</a>`).join('')}${!own && me.user ? `<a href="${base}/compare" class="${tab === 'compare' ? 'on' : ''}">Compare</a>` : ''}</nav>
     <div id="tab"></div><div style="height:60px"></div></div>`;
+  el.querySelector('.tabsbar a.on')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   wireFollows(el, rerender);
   $('#log', el)?.addEventListener('click', () => logSheet({ onSaved: rerender }));
   const box = $('#tab', el);
