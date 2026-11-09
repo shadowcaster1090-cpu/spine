@@ -2,11 +2,18 @@ import { get, post, del, me } from '../api.js';
 import { esc, cover, regTag, setTitle, toast, $ } from '../ui.js';
 import { copyModal } from '../forms.js';
 import { startScanner, decodeFile, normalise, unlockFeedback, feedback } from '../scan.js';
-import { canNativeFetch, nativeFetch } from '../bridge.js';
+import { canNativeFetch } from '../bridge.js';
+import { identify } from '../identify.js';
 
 const KEY = 'spine-scan-session';
 const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY)) || { mode: 'shelf', items: [] }; } catch { return { mode: 'shelf', items: [] }; } };
 const save = (s) => { try { sessionStorage.setItem(KEY, JSON.stringify(s)); } catch { /* private mode */ } };
+// "a Warner Bros. release", "an Icon release", "an MGM release", "a Criterion Collection release".
+const releaseOf = (label) => {
+  const name = String(label).replace(/^The /, ''), first = name.split(' ')[0];
+  const an = /^[A-Z]{2,}$/.test(first) ? /^[AEFHILMNORSX]/.test(first) : /^(?:[aio]|e(?!u)|um|un(?!i)|8|11\b|18\b)/i.test(name);
+  return `${an ? 'an' : 'a'} <b>${esc(name)}</b> release`;
+};
 
 export default async function ({ el, needLogin, go }) {
   if (!me.user) return needLogin();
@@ -57,12 +64,13 @@ export default async function ({ el, needLogin, go }) {
       wanted: `<button class="link" data-undo="${i}">Undo</button>`,
       already: `<button class="btn sm" data-again="${i}">Add another copy</button>`,
       unknown: `<a class="btn sm primary" href="${manualLink(it)}">Add it</a>`,
-      nolookup: `<button class="btn sm primary" data-retry="${i}">Try again</button><a class="btn sm" href="${manualLink(it)}">Add by hand</a>`,
+      // Without the phone's own lookup only the server can ask, and its shared address is usually out of lookups: adding by hand comes first.
+      nolookup: canNativeFetch() ? `<button class="btn sm primary" data-retry="${i}">Try again</button><a class="btn sm" href="${manualLink(it)}">Add by hand</a>` : `<a class="btn sm primary" href="${manualLink(it)}">Add by hand</a><button class="btn sm" data-retry="${i}">Try again</button>`,
       error: `<button class="btn sm" data-retry="${i}">Try again</button>`
     }[it.state] || '';
     const choices = it.state === 'multiple' ? `<div class="pick" style="margin-top:8px">${it.choices.map((c, k) => `<button data-choose="${i}:${k}"><span><b>${esc(c.label || '')}</b> <span class="dim">${esc(c.cat_no)} · ${esc(c.packaging || '')}</span></span>${regTag(c)}</button>`).join('')}</div>` : '';
-    const note = it.state === 'unknown' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">The barcode databases don’t know this one${it.hint?.label ? `, but the barcode says it’s a <b>${esc(it.hint.label)}</b> release${it.hint.region ? ` (Region ${esc(it.hint.region)})` : ''}` : ''}. Type the film’s title once and it goes on your shelf with its poster; everyone else can scan it after that.${it.via === 'phone' ? ' <span class="mono" style="opacity:.6">Checked from this phone.</span>' : ''}</p>`
-      : it.state === 'nolookup' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${esc(it.error || 'The barcode services could not be reached.')} The code is kept here; try again in a moment.</p>`
+    const note = it.state === 'unknown' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">The barcode databases don’t know this one${it.hint?.label ? `, but the barcode says it’s ${releaseOf(it.hint.label)}${it.hint.region ? ` (Region ${esc(it.hint.region)})` : ''}` : ''}. Type the film’s title once and it goes on your shelf with its poster; everyone else can scan it after that.${it.via === 'phone' ? ' <span class="mono" style="opacity:.6">Checked from this phone.</span>' : ''}</p>`
+      : it.state === 'nolookup' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${esc(it.error || 'The barcode services could not be reached.')} ${it.side === 'server' && !canNativeFetch() ? 'The code is kept here.' : 'The code is kept here; try again in a moment.'}</p>`
       : it.state === 'pending' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${it.mine ? 'You already submitted this edition. It will go on your shelf when a moderator approves it.' : 'Someone has submitted this edition. Scan it again once it’s approved.'}</p>` : '';
     return `<div class="wrow scanrow">${head}<div class="s" style="margin-top:6px">${chip}</div>${note}${choices}</div><div class="act btns">${acts}</div></div>`;
   }
@@ -153,7 +161,7 @@ export default async function ({ el, needLogin, go }) {
         it.state = 'searching'; paint();
         const found = await identify(code);
         if (found?.product) { it.state = 'found'; it.found = found; it.coverUrl = found.product.images?.[0] || ''; }
-        else if (found?.trouble) { it.state = 'nolookup'; it.error = found.trouble; }
+        else if (found?.trouble) { it.state = 'nolookup'; it.error = found.trouble; it.side = found.side || ''; }
         else { it.state = 'unknown'; it.hint = found?.hint || r.hint || null; it.via = found?.via || 'server'; }
       }
       const t = it.edition?.title || it.found?.film?.title || it.found?.parsed?.title;
@@ -162,37 +170,6 @@ export default async function ({ el, needLogin, go }) {
     } catch (e) { it.state = 'error'; it.error = e.message; feedback(false); }
     busy.delete(code);
     paint();
-  }
-
-  // Barcode services ration lookups per internet address, so the phone asks first (its own allowance);
-  // the server asks only when the phone cannot. Either way the server reads the answer and finds the film.
-  async function identify(code) {
-    let trouble = '', saidUnknown = false;
-    const url = `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`;
-    try {
-      // The service refuses cross-origin browser calls, so only the iPhone shell can ask it from here.
-      let status = 0, text = '';
-      if (canNativeFetch()) ({ status, body: text } = await nativeFetch(url));
-      else { const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(7000) }); status = r.status; text = await r.text(); }
-      if (status === 429) trouble = 'UPCitemdb has had its 100 free lookups from this phone today.';
-      else if (status === 0) trouble = canNativeFetch() ? 'The app could not reach UPCitemdb (no answer).' : /SpineApp\//.test(navigator.userAgent) ? 'This version of the Spine app cannot look barcodes up itself; rebuild it from Xcode.' : 'Browsers cannot ask UPCitemdb directly; only the server can, and it is rate limited.';
-      else if (status === 200) {
-        const data = JSON.parse(text);
-        const item = (data.items || [])[0];
-        if (item) {
-          return await post(`/api/barcode/${code}/identify`, { product: { source: 'upcitemdb', title: item.title, brand: item.brand, description: item.description, category: item.category, images: item.images, titles: (item.offers || []).map((o) => o.title) } });
-        }
-        saidUnknown = true;   // UPCitemdb answered: not in its database. The server's other sources are a long shot.
-      } else if (status === 404) saidUnknown = true;
-      else if (status) trouble = `UPCitemdb answered ${status}.`;
-    } catch { /* offline, blocked or timed out: the server tries */ }
-    try {
-      const s = await get(`/api/barcode/${code}/lookup`);
-      if (s.product) return s;
-      if (saidUnknown) return { ...s, via: canNativeFetch() ? 'phone' : 'browser' };   // genuinely not in the databases: the manual add, prefilled from the barcode
-      if (s.errors?.length) return { trouble: (trouble ? trouble + ' ' : '') + 'The server could not look it up either (' + s.errors[0] + ').' };
-      return trouble ? { trouble } : s;
-    } catch (e) { return saidUnknown ? { product: null, via: canNativeFetch() ? 'phone' : 'browser' } : { trouble: trouble || e.message }; }
   }
 
   async function begin() {

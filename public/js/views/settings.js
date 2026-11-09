@@ -1,6 +1,10 @@
 import { patch, del, get, post, me, loadMe } from '../api.js';
 import { esc, bindForm, toast, setTitle, field, area, poster, modal, confirmDialog, $ } from '../ui.js';
 import { startProviderSignIn } from '../oauth.js';
+import { appVersion, hasBridge, canNativeFetch } from '../bridge.js';
+import { identify } from '../identify.js';
+
+const DIAG_CODE = '5051892210034';   // Dunkirk, Warner 4K: a disc UPCitemdb knows, so a working path shows a title
 
 export default async function view(ctx) {
   const { el, needLogin, go, refreshHeader } = ctx;
@@ -48,7 +52,10 @@ export default async function view(ctx) {
       <a class="row" href="/api/me/export" download><span class="grow"><span class="t">Download my data</span><span class="s">Everything Spine holds about you, as JSON</span></span><span class="chev">›</span></a>
       <a class="row" href="/api/collection/export.csv" download><span class="grow"><span class="t">Download my collection</span><span class="s">A spreadsheet of your shelf</span></span><span class="chev">›</span></a></div>
 
-    ${navigator.userAgent.includes('SpineApp') ? `<div class="group-title">This iPhone</div><div class="inset"><button class="row" id="chsrv"><span class="grow"><span class="t">Change server address</span><span class="s">${esc(location.origin)}</span></span><span class="chev">›</span></button></div>` : ''}
+    ${appVersion() || hasBridge() ? `<div class="group-title">This iPhone</div><div class="inset">
+      <button class="row" id="chsrv"><span class="grow"><span class="t">Change server address</span><span class="s">${esc(location.origin)}</span></span><span class="chev">›</span></button>
+      <div class="row"><span class="grow"><span class="t">Barcode lookup diagnostics</span><span class="s mono" style="white-space:normal">SpineApp/${esc(appVersion() || '?')} · bridge ${hasBridge() ? 'present' : 'missing'} · native lookups ${canNativeFetch() ? 'on' : 'off'}</span></span><button type="button" class="btn sm" id="diag-run">Test lookup</button></div>
+      <div id="diag-out" hidden style="padding:2px 16px 14px"></div></div>` : ''}
 
     ${u.role === 'admin' ? `<div class="group-title">Register (admin)</div>
     <div class="inset"><button class="row" id="posters"><span class="grow"><span class="t">Fetch real posters from TMDB</span><span class="s">Matches films without artwork and stores their posters, credits and synopses</span></span><span class="chev">›</span></button></div>` : ''}
@@ -104,6 +111,27 @@ export default async function view(ctx) {
     b.disabled = false;
   });
   $('#chsrv', el)?.addEventListener('click', () => { try { window.webkit.messageHandlers.spine.postMessage({ type: 'resetServer' }); } catch { toast('Not running in the Spine app', true); } });
+  // Barcode lookup diagnostics: one tap says whether the shell's native fetch answers, and how each side did.
+  $('#diag-run', el)?.addEventListener('click', async (ev) => {
+    const b = ev.currentTarget, out = $('#diag-out', el);
+    b.disabled = true; b.textContent = 'Testing…'; out.hidden = false;
+    out.innerHTML = `<p class="mono dim" style="margin:0">Looking up ${DIAG_CODE} (Dunkirk, Warner 4K)…</p>`;
+    try {
+      const r = await identify(DIAG_CODE);
+      const d = r.diag || {};
+      const http = (x) => [x.status ? `HTTP ${x.status}` : 'no answer', x.error, x.errors?.length ? x.errors.join('; ') : '', x.cached ? 'cached' : '', x.ms != null ? `${x.ms} ms` : ''].filter(Boolean).join(' · ');
+      const rows = [
+        ['Answered by', r.trouble ? `nobody · ${r.side || 'unknown'} side failed` : r.via || 'server'],
+        d.phone ? ['Phone → UPCitemdb', http(d.phone)] : d.browser ? ['Browser → UPCitemdb', http(d.browser)] : ['Phone → UPCitemdb', 'not asked · no bridge (SpineApp/1.2 or later needed)'],
+        [`Server · ${d.server?.step || 'lookup'}`, d.server ? http(d.server) : 'not asked'],
+        ['Elapsed', `${d.ms ?? 0} ms`],
+        ['Title', r.product ? `${r.parsed?.title || r.product.title}${r.film?.year ? ` (${r.film.year})` : ''} · ${r.film ? `TMDB ${r.film.tmdb_id}` : 'no TMDB match'}` : r.trouble ? '—' : `not in the databases${r.hint?.label ? ` · hint ${r.hint.label}` : ''}`],
+        r.trouble ? ['Message', r.trouble] : null
+      ].filter(Boolean);
+      out.innerHTML = `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd style="text-align:left;white-space:normal;overflow-wrap:anywhere">${esc(v)}</dd>`).join('')}</dl>`;
+    } catch (e) { out.innerHTML = `<p class="mono dim" style="margin:0">${esc(e.message)}</p>`; }
+    b.disabled = false; b.textContent = 'Test lookup';
+  });
   if (location.hash === '#favourites') setTimeout(() => $('#favourites', el)?.scrollIntoView({ block: 'start' }), 50);
 }
 
