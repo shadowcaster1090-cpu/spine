@@ -168,6 +168,7 @@ export default async function ({ el, needLogin, go }) {
       if (canNativeFetch()) ({ status, body: text } = await nativeFetch(url));
       else { const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(7000) }); status = r.status; text = await r.text(); }
       if (status === 429) trouble = 'UPCitemdb has had its 100 free lookups from this phone today.';
+      else if (status === 0) trouble = canNativeFetch() ? 'The app could not reach UPCitemdb (no answer).' : /SpineApp\//.test(navigator.userAgent) ? 'This version of the Spine app cannot look barcodes up itself; rebuild it from Xcode.' : 'Browsers cannot ask UPCitemdb directly; only the server can, and it is rate limited.';
       else if (status === 200) {
         const data = JSON.parse(text);
         const item = (data.items || [])[0];
@@ -180,7 +181,7 @@ export default async function ({ el, needLogin, go }) {
     try {
       const s = await get(`/api/barcode/${code}/lookup`);
       if (s.product) return s;
-      if (s.errors?.length) return { trouble: trouble || 'The barcode services could not be reached from the server (' + s.errors[0] + ').' };
+      if (s.errors?.length) return { trouble: (trouble ? trouble + ' ' : '') + 'The server could not look it up either (' + s.errors[0] + ').' };
       return trouble ? { trouble } : s;
     } catch (e) { return { trouble: trouble || e.message }; }
   }
