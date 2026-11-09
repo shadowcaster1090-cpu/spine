@@ -58,7 +58,9 @@ export default async function view(ctx) {
       <div id="diag-out" hidden style="padding:2px 16px 14px"></div></div>` : ''}
 
     ${u.role === 'admin' ? `<div class="group-title">Register (admin)</div>
-    <div class="inset"><button class="row" id="posters"><span class="grow"><span class="t">Fetch real posters from TMDB</span><span class="s">Matches films without artwork and stores their posters, credits and synopses</span></span><span class="chev">›</span></button></div>` : ''}
+    <div class="inset"><button class="row" id="posters"><span class="grow"><span class="t">Fetch real posters from TMDB</span><span class="s">Matches films without artwork and stores their posters, credits and synopses</span></span><span class="chev">›</span></button>
+      <div class="row"><span class="grow"><span class="t">Barcode database</span><span class="s mono" id="bc-stats" style="white-space:normal">Every barcode Spine knows, so scans need no outside lookup</span></span>
+        <a class="btn sm" href="/api/barcodes/export.csv" download>Download</a><label class="btn sm" for="bc-file">Import</label><input id="bc-file" type="file" accept=".csv,text/csv,text/plain" hidden></div></div>` : ''}
 
     <div class="group-title">Delete account</div>
     <form class="inset" id="delacc" style="padding:16px"><p class="dim" style="font-size:14px">This removes your account, diary, collection, wantlist, reviews and lists for good. Editions you added to the register stay, without your name.</p>
@@ -110,6 +112,19 @@ export default async function view(ctx) {
     } catch (e) { toast(e.message, true); }
     b.disabled = false;
   });
+  // Spine's own barcode database: counts, a CSV to keep on your computer, and an import from one.
+  const bcStats = (s) => { const n = $('#bc-stats', el); if (n) n.textContent = `${s.register} on the register · ${s.products} found by lookups or imported · ${s.unknown} no source has`; };
+  if ($('#bc-stats', el)) get('/api/barcodes/stats').then(bcStats).catch(() => {});
+  $('#bc-file', el)?.addEventListener('change', async (ev) => {
+    const f = ev.target.files[0]; ev.target.value = '';
+    if (!f) return;
+    if (f.size > 50e6) return toast('That file is over 50 MB.', true);
+    try {
+      const r = await post('/api/barcodes/import', { csv: await f.text() });
+      bcStats(r.stats);
+      toast(`Imported ${r.added} barcode${r.added === 1 ? '' : 's'}${r.already ? ` · ${r.already} already known` : ''}${r.skipped ? ` · ${r.skipped} rows without a barcode and title` : ''}`);
+    } catch (e) { toast(e.message, true); }
+  });
   $('#chsrv', el)?.addEventListener('click', () => { try { window.webkit.messageHandlers.spine.postMessage({ type: 'resetServer' }); } catch { toast('Not running in the Spine app', true); } });
   // Barcode lookup diagnostics: one tap says whether the shell's native fetch answers, and how each side did.
   $('#diag-run', el)?.addEventListener('click', async (ev) => {
@@ -117,7 +132,7 @@ export default async function view(ctx) {
     b.disabled = true; b.textContent = 'Testing…'; out.hidden = false;
     out.innerHTML = `<p class="mono dim" style="margin:0">Looking up ${DIAG_CODE} (Dunkirk, Warner 4K)…</p>`;
     try {
-      const r = await identify(DIAG_CODE);
+      const r = await identify(DIAG_CODE, { ownFirst: false });   // always exercise the phone, not Spine's own records
       const d = r.diag || {};
       const http = (x) => [x.status ? `HTTP ${x.status}` : 'no answer', x.error, x.errors?.length ? x.errors.join('; ') : '', x.cached ? 'cached' : '', x.ms != null ? `${x.ms} ms` : ''].filter(Boolean).join(' · ');
       const rows = [

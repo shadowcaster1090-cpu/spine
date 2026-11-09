@@ -69,7 +69,7 @@ export default async function ({ el, needLogin, go }) {
       error: `<button class="btn sm" data-retry="${i}">Try again</button>`
     }[it.state] || '';
     const choices = it.state === 'multiple' ? `<div class="pick" style="margin-top:8px">${it.choices.map((c, k) => `<button data-choose="${i}:${k}"><span><b>${esc(c.label || '')}</b> <span class="dim">${esc(c.cat_no)} · ${esc(c.packaging || '')}</span></span>${regTag(c)}</button>`).join('')}</div>` : '';
-    const note = it.state === 'unknown' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">The barcode databases don’t know this one${it.hint?.label ? `, but the barcode says it’s ${releaseOf(it.hint.label)}${it.hint.region ? ` (Region ${esc(it.hint.region)})` : ''}` : ''}. Type the film’s title once and it goes on your shelf with its poster; everyone else can scan it after that.${it.via === 'phone' ? ' <span class="mono" style="opacity:.6">Checked from this phone.</span>' : ''}</p>`
+    const note = it.state === 'unknown' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">The barcode databases don’t know this one${it.hint?.label ? `, but the barcode says it’s ${releaseOf(it.hint.label)}${it.hint.region ? ` (Region ${esc(it.hint.region)})` : ''}` : ''}. Type the film’s title once and it goes on your shelf with its poster; everyone else can scan it after that.${it.via === 'phone' ? ' <span class="mono" style="opacity:.6">Checked from this phone.</span>' : it.via === 'spine' ? ' <span class="mono" style="opacity:.6">From Spine’s own barcode records.</span>' : ''}</p>`
       : it.state === 'nolookup' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${esc(it.error || 'The barcode services could not be reached.')} ${it.side === 'server' && !canNativeFetch() ? 'The code is kept here.' : 'The code is kept here; try again in a moment.'}</p>`
       : it.state === 'pending' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${it.mine ? 'You already submitted this edition. It will go on your shelf when a moderator approves it.' : 'Someone has submitted this edition. Scan it again once it’s approved.'}</p>` : '';
     return `<div class="wrow scanrow">${head}<div class="s" style="margin-top:6px">${chip}</div>${note}${choices}</div><div class="act btns">${acts}</div></div>`;
@@ -254,11 +254,12 @@ export default async function ({ el, needLogin, go }) {
     } catch (e) { toast(e.message, true); }
   };
 
-  // Back from adding an unknown disc: look those codes up again.
+  // Back from adding an unknown disc: check the register for those codes again. Only lookups that never finished
+  // (or failed) run again; a disc already known to be unknown costs nothing until it reaches the register.
   for (const it of S.items.filter((x) => ['unknown', 'pending', 'looking', 'searching', 'found', 'nolookup'].includes(x.state))) {
     get(`/api/barcode/${it.code}`).then((r) => {
       if (r.items.length === 1) { it.edition = r.items[0]; delete it.found; it.state = me.copies.has(it.edition.id) ? 'added' : 'unknown'; if (it.state === 'unknown') return handle(it.code, false); }
-      else if (!r.items.length && !r.pending && it.state !== 'found') return handle(it.code, false);
+      else if (!r.items.length && !r.pending && ['looking', 'searching', 'nolookup'].includes(it.state)) return handle(it.code, false);
       else if (r.pending) { it.state = 'pending'; it.mine = r.pending.mine; }
       paint();
     }).catch(() => {});
