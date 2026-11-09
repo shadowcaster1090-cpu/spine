@@ -8,7 +8,9 @@ import { barcodeAlt } from './catalogue.js';
 import { matchMovie } from './tmdb.js';
 
 const env = (k) => process.env[k] || '';
-const CACHE_HIT_DAYS = 90, CACHE_MISS_DAYS = 7;
+// barcode_cache is Spine's own barcode database: a product found once is kept for good (the register itself
+// takes over once the disc is added), and a disc no source knows is asked about again only after a month.
+const CACHE_HIT_DAYS = 36500, CACHE_MISS_DAYS = 30;
 const UA = 'Spine/1.0 (+https://github.com/shadowcaster1090-cpu/spine)';
 
 /* ---------- providers ---------- */
@@ -94,7 +96,9 @@ export const PROVIDERS = [
 ];
 
 // Asks providers in turn; remembers answers (and misses) so a disc is looked up once.
-export async function lookupProduct(db, rawCode, { fetchImpl = fetch, force = false } = {}) {
+// cachedOnly: answer from Spine's own records alone (known: false when they have nothing to say).
+// skip: provider ids already asked elsewhere, e.g. 'upcitemdb' when the phone has just been told "no items".
+export async function lookupProduct(db, rawCode, { fetchImpl = fetch, force = false, cachedOnly = false, skip = [] } = {}) {
   const code = String(rawCode).replace(/\D/g, '');
   const codes = [...new Set([code, barcodeAlt(code)])];
   if (!force) {
@@ -102,13 +106,14 @@ export async function lookupProduct(db, rawCode, { fetchImpl = fetch, force = fa
     if (row) {
       const data = JSON.parse(row.data);
       const ttl = (data.product ? CACHE_HIT_DAYS : CACHE_MISS_DAYS) * 864e5;
-      if (Date.now() - row.fetched_at < ttl) return { ...data, cached: true };
+      if (Date.now() - row.fetched_at < ttl) return { ...data, cached: true, known: true };
     }
   }
+  if (cachedOnly) return { product: null, errors: [], cached: false, known: false };
   let product = null;
   const errors = [];
   for (const p of PROVIDERS) {
-    if (!p.enabled()) continue;
+    if (!p.enabled() || skip.includes(p.id)) continue;
     for (const c of codes) {
       try {
         product = await p.lookup(c, fetchImpl);
@@ -122,7 +127,75 @@ export async function lookupProduct(db, rawCode, { fetchImpl = fetch, force = fa
   if (product || !errors.length) {
     db.prepare('INSERT INTO barcode_cache (code, data, fetched_at) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at').run(code, JSON.stringify(data), Date.now());
   }
-  return { ...data, cached: false };
+  return { ...data, cached: false, known: !!product || !errors.length };
+}
+
+/* ---------- Spine's barcode database on your own computer: export, import, counts ---------- */
+const putCache = (db) => db.prepare('INSERT INTO barcode_cache (code, data, fetched_at) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at');
+
+// Barcodes on the register, in both spellings: their own row wins over anything a lookup once said about them.
+const registerCodes = (db) => {
+  const set = new Set();
+  for (const { barcode } of db.prepare("SELECT barcode FROM editions WHERE barcode != '' AND merged_into IS NULL").all()) { set.add(barcode); set.add(barcodeAlt(barcode)); }
+  return set;
+};
+
+export function barcodeStats(db) {
+  const reg = registerCodes(db);
+  const register = db.prepare("SELECT count(*) n FROM editions WHERE barcode != '' AND merged_into IS NULL").get().n;
+  let products = 0, unknown = 0, imported = 0;
+  for (const r of db.prepare('SELECT code, data FROM barcode_cache').all()) {
+    if (reg.has(r.code)) continue;
+    const p = JSON.parse(r.data).product;
+    if (!p) unknown++; else { products++; if (p.source === 'import') imported++; }
+  }
+  return { register, products, unknown, imported };
+}
+
+// Every barcode Spine knows: discs on the register, products found by a lookup or imported, and codes no source has.
+export function exportBarcodes(db) {
+  const rows = [['barcode', 'status', 'title', 'label_or_brand', 'source', 'updated']];
+  for (const e of db.prepare(`SELECT e.barcode, f.title, f.year, l.name label, e.updated_at FROM editions e JOIN films f ON f.id = e.film_id
+      LEFT JOIN labels l ON l.id = e.label_id WHERE e.barcode != '' AND e.merged_into IS NULL ORDER BY e.id`).all()) {
+    rows.push([e.barcode, 'on the register', e.year ? `${e.title} (${e.year})` : e.title, e.label || '', 'register', String(e.updated_at || '').slice(0, 10)]);
+  }
+  const reg = registerCodes(db);
+  for (const c of db.prepare('SELECT code, data, fetched_at FROM barcode_cache ORDER BY code').all()) {
+    if (reg.has(c.code)) continue;
+    const p = JSON.parse(c.data).product;
+    rows.push([c.code, p ? 'product' : 'no source has it', p?.title || '', p?.brand || '', p?.source || '', new Date(c.fetched_at).toISOString().slice(0, 10)]);
+  }
+  return rows;
+}
+
+// Barcodes from a spreadsheet on your computer (this export, or another collection app's) join Spine's own records,
+// so scanning those discs needs no outside lookup. Columns are found by name (barcode/upc/ean, title/name,
+// label/brand/studio), or taken as barcode, title, label when there is no header row. Known products are kept.
+export function importBarcodes(db, rows) {
+  if (!rows.length) return { added: 0, already: 0, skipped: 0 };
+  const head = rows[0].map((h) => String(h).trim().toLowerCase());
+  const col = (...names) => head.findIndex((h) => names.includes(h));
+  let ci = col('barcode', 'upc', 'ean', 'ean13', 'ean-13', 'gtin', 'code'), ti = col('title', 'name', 'product', 'film', 'movie');
+  let li = col('label', 'label_or_brand', 'brand', 'studio', 'distributor', 'publisher');
+  const header = ci >= 0 && ti >= 0;
+  if (!header) { ci = 0; ti = 1; li = 2; }
+  const onRegister = db.prepare('SELECT 1 FROM editions WHERE barcode IN (?, ?) AND merged_into IS NULL');
+  const cached = db.prepare('SELECT data FROM barcode_cache WHERE code IN (?, ?)');
+  const put = putCache(db);
+  let added = 0, already = 0, skipped = 0;
+  for (const r of rows.slice(header ? 1 : 0, 200001)) {
+    const code = String(r[ci] ?? '').replace(/\D/g, '');
+    const title = String(r[ti] ?? '').trim().slice(0, 200);
+    if (code.length < 8 || code.length > 14 || !title) { skipped++; continue; }
+    const alt = barcodeAlt(code);
+    if (onRegister.get(code, alt)) { already++; continue; }
+    const prev = cached.get(code, alt);
+    if (prev && JSON.parse(prev.data).product) { already++; continue; }
+    const brand = li >= 0 ? String(r[li] ?? '').trim().slice(0, 100) : '';
+    put.run(code, JSON.stringify({ product: { source: 'import', code, title, brand, description: '', category: '', images: [], titles: [] }, errors: [] }), Date.now());
+    added++;
+  }
+  return { added, already, skipped };
 }
 
 /* ---------- reading a retail title ---------- */
@@ -323,10 +396,10 @@ export function parseProductTitle(raw, { brand = '', code = '', alternatives = [
 }
 
 /* ---------- the whole thing ---------- */
-export async function suggestFromBarcode(db, tmdb, code, { fetchImpl = fetch, force = false } = {}) {
-  const looked = await lookupProduct(db, code, { fetchImpl, force });
+export async function suggestFromBarcode(db, tmdb, code, { fetchImpl = fetch, force = false, cachedOnly = false, skip = [] } = {}) {
+  const looked = await lookupProduct(db, code, { fetchImpl, force, cachedOnly, skip });
   if (looked.errors?.length) console.warn(`barcode ${code}: ${looked.errors.join('; ')}`);
-  return suggestFromProduct(db, tmdb, code, looked.product, { errors: looked.errors, cached: looked.cached });
+  return { ...(await suggestFromProduct(db, tmdb, code, looked.product, { errors: looked.errors, cached: looked.cached })), known: looked.known };
 }
 
 // A product the phone fetched itself (each phone has its own daily allowance with the barcode
@@ -335,7 +408,7 @@ export function acceptClientProduct(db, code, raw) {
   if (!raw || typeof raw !== 'object') return null;
   const str = (x, n) => (typeof x === 'string' ? x.trim().slice(0, n) : '');
   const product = {
-    source: ['upcitemdb', 'openproductsfacts', 'upcdatabase'].includes(raw.source) ? raw.source : 'client',
+    source: ['upcitemdb', 'openproductsfacts', 'upcdatabase', 'eansearch'].includes(raw.source) ? raw.source : 'client',
     code, title: str(raw.title, 200), brand: str(raw.brand, 100), description: str(raw.description, 2000), category: str(raw.category, 200),
     images: (Array.isArray(raw.images) ? raw.images : []).filter((u) => typeof u === 'string' && /^https?:\/\/[^\s"']+$/.test(u) && u.length < 600).slice(0, 8),
     titles: (Array.isArray(raw.titles) ? raw.titles : []).filter((t) => typeof t === 'string').map((t) => t.trim().slice(0, 200)).filter(Boolean).slice(0, 10)
