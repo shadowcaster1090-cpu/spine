@@ -1,6 +1,6 @@
 /* Spine design system — "the projection booth at night".
    Warm black, film-stock ivory and a darkroom safelight red. Titles in an italic serif, catalogue data
-   in mono like a lab sheet, a still layer of film grain over everything. Dark is the house style;
+   in mono like a lab sheet, film grain printed on the page beneath the content. Dark is the house style;
    "Paper" is an ivory variant for daylight. */
 :root {
   --ink: #0e0d0c; --panel: #161513; --raise: #1e1c19; --paper: #ece4d5; --dim: #8f877a; --lamp: #e5482f;
@@ -52,9 +52,10 @@
 [hidden] { display: none !important }
 html { -webkit-text-size-adjust: 100% }
 html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility }
-body { min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden }
-/* film grain: a still layer over the whole app */
-body::before { content: ""; position: fixed; inset: 0; z-index: 200; pointer-events: none; background-image: var(--grain); background-size: 140px 140px; opacity: .065 }
+/* film grain, printed on the page: the noise tile under a 93.5% veil of the page colour gives the same 6.5% grain as
+   before, but as the page's own background it scrolls with the content and stays under posters and covers (they carry their own) */
+body { min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; --veil: color-mix(in srgb, var(--bg) 93.5%, transparent);
+  background: linear-gradient(var(--veil), var(--veil)), var(--grain) 0 0 / 140px 140px var(--bg) }
 main { flex: 1; outline: none; min-width: 0 }
 a { color: inherit; text-decoration: none }
 button, input, select, textarea { font: inherit; color: inherit; margin: 0 }
