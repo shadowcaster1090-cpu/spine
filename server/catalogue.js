@@ -46,6 +46,7 @@ export const EDITION_FIELDS = {
   discs: int(1, 50),
   disc_type: oneOf(['', 'DVD-5', 'DVD-9', 'DVD-10', 'DVD-18']),
   packaging: str(60),
+  format: oneOf(['', 'dvd', 'bluray', 'uhd']),
   barcode: pattern(/^\d{8,14}$/, 'a barcode is 8 to 14 digits.'),
   oop: bool,
   audio: str(300),
@@ -128,7 +129,7 @@ export function attachDirectors(db, rows, key = 'film_id') {
   return rows;
 }
 
-const CARD_SQL = `SELECT e.id, e.cat_no, e.spine_no, e.region, e.standard, e.oop, e.discs, e.release_year, e.packaging, e.anamorphic,
+const CARD_SQL = `SELECT e.id, e.cat_no, e.spine_no, e.region, e.standard, e.oop, e.discs, e.release_year, e.packaging, e.anamorphic, e.format,
   f.id AS film_id, f.title, f.year, f.country, f.palette, f.aspect,
   l.id AS label_id, l.name AS label,
   (SELECT file FROM images WHERE id = e.cover_image_id) AS cover,
@@ -266,7 +267,8 @@ export function getFilmRow(db, id) {
   const f = db.prepare('SELECT * FROM films WHERE id = ?').get(id);
   if (!f) fail(404, 'That film is not on the register.');
   const directors = db.prepare('SELECT p.id, p.name FROM film_directors fd JOIN people p ON p.id = fd.person_id WHERE fd.film_id = ? ORDER BY fd.position').all(id);
-  return { ...f, palette: f.palette ? JSON.parse(f.palette) : paletteFor(f.title), directors };
+  const cover = f.poster || db.prepare('SELECT i.file FROM editions e JOIN images i ON i.id = e.cover_image_id WHERE e.film_id = ? AND e.merged_into IS NULL ORDER BY e.id LIMIT 1').get(id)?.file || null;
+  return { ...f, cover, palette: f.palette ? JSON.parse(f.palette) : paletteFor(f.title), directors };
 }
 
 export function editionMeta(db, id) {
@@ -284,7 +286,7 @@ export function editionMeta(db, id) {
 }
 
 /* ---------- writes ---------- */
-function setDirectors(db, filmId, names) {
+export function setDirectors(db, filmId, names) {
   db.prepare('DELETE FROM film_directors WHERE film_id = ?').run(filmId);
   names.forEach((name, i) => {
     db.prepare('INSERT INTO people (name) VALUES (?) ON CONFLICT(name) DO NOTHING').run(name);
@@ -308,7 +310,7 @@ export function notify(db, userId, text, link = '') {
   db.prepare('INSERT INTO notifications (user_id, text, link) VALUES (?, ?, ?)').run(userId, text, link);
 }
 
-function findOrCreateFilm(db, input) {
+export function findOrCreateFilm(db, input) {
   if (input.film_id) {
     const f = db.prepare('SELECT id FROM films WHERE id = ?').get(+input.film_id);
     if (!f) fail(400, 'That film is not on the register.');
@@ -318,8 +320,9 @@ function findOrCreateFilm(db, input) {
   const existing = (f.tmdb_id && db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(f.tmdb_id))
     || db.prepare('SELECT id FROM films WHERE title = ? COLLATE NOCASE AND year IS ?').get(f.title, f.year);
   if (existing) return { id: existing.id, created: false };
-  const { lastInsertRowid } = db.prepare(`INSERT INTO films (title, original_title, year, country, language, runtime, aspect, synopsis, tmdb_id, palette)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.title, f.original_title, v(f.year), f.country, f.language, v(f.runtime), f.aspect, f.synopsis, v(f.tmdb_id), JSON.stringify(paletteFor(f.title + f.year)));
+  const posterPath = typeof input.film?.poster_path === 'string' && /^\/[\w.-]+$/.test(input.film.poster_path) ? input.film.poster_path : '';
+  const { lastInsertRowid } = db.prepare(`INSERT INTO films (title, original_title, year, country, language, runtime, aspect, synopsis, tmdb_id, palette, poster_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(f.title, f.original_title, v(f.year), f.country, f.language, v(f.runtime), f.aspect, f.synopsis, v(f.tmdb_id), JSON.stringify(paletteFor(f.title + f.year)), posterPath);
   setDirectors(db, Number(lastInsertRowid), f.directors);
   reindexFilm(db, Number(lastInsertRowid));
   return { id: Number(lastInsertRowid), created: true };
@@ -465,7 +468,7 @@ const FILM_SQL = `SELECT f.id, f.title, f.original_title, f.year, f.country, f.r
   (SELECT round(avg(rating) / 2.0, 1) FROM watches WHERE film_id = f.id AND rating IS NOT NULL) AS rating,
   (SELECT count(*) FROM watches WHERE film_id = f.id) AS watches,
   (SELECT count(*) FROM likes WHERE film_id = f.id) AS likes,
-  (SELECT i.file FROM editions e JOIN images i ON i.id = e.cover_image_id WHERE e.film_id = f.id AND e.merged_into IS NULL ORDER BY e.id LIMIT 1) AS cover
+  coalesce(nullif(f.poster, ''), (SELECT i.file FROM editions e JOIN images i ON i.id = e.cover_image_id WHERE e.film_id = f.id AND e.merged_into IS NULL ORDER BY e.id LIMIT 1)) AS cover
   FROM films f`;
 
 export function filmCards(db, where = '1', params = [], order = 'f.title COLLATE NOCASE', limit = 48, offset = 0) {

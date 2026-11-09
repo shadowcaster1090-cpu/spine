@@ -152,6 +152,7 @@ nav.tabs { display: none }
 .reg { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--text-2); white-space: nowrap }
 .reg.r1 { border-color: #4f6a86; color: #a9c3de } .reg.r2 { border-color: #7a5a3c; color: #e0bf98 } .reg.r0 { border-color: #555; color: #ddd } .reg.r3 { border-color: #5d7a52; color: #b8d4a8 } .reg.r4 { border-color: #7a4f6f; color: #d9a9cf }
 :root[data-theme="light"] .reg.r1 { color: #2d4f73 } :root[data-theme="light"] .reg.r2 { color: #6b4a2a } :root[data-theme="light"] .reg.r0 { color: #444 } :root[data-theme="light"] .reg.r3 { color: #3f5b36 } :root[data-theme="light"] .reg.r4 { color: #5f3d57 }
+.reg.fmt { border-color: #3f6a8a; color: #9cc3e0; margin-left: 4px } .reg.fmt.uhd { border-color: #7a6a2b; color: #e0cf7a }
 .oop { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); padding: 1px 5px; border-radius: 3px; white-space: nowrap; text-transform: uppercase }
 .cond { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; background: var(--fill); color: var(--text-2) }
 .cond.M, .cond.NM { background: var(--ok-soft); color: var(--ok) } .cond.VGp, .cond.VG { background: var(--warn-soft); color: var(--warn) } .cond.G, .cond.F, .cond.P { background: var(--bad-soft); color: var(--bad) }

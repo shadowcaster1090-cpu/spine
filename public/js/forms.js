@@ -169,6 +169,7 @@ export function editionFields(e = {}, labels = []) {
     ${field('cat_no', 'Catalogue number', { value: e.cat_no, hint: 'As printed on the spine or back' })}
     ${field('spine_no', 'Spine number', { type: 'number', value: e.spine_no ?? '', attrs: 'min="0" inputmode="numeric"' })}
     ${field('region', 'Region', { value: e.region, hint: REGION_HINT, attrs: 'required inputmode="numeric" pattern="0|[1-8](,[1-8])*"' })}
+    ${select('format', 'Format', [['', 'DVD'], ['dvd', 'DVD'], ['bluray', 'Blu-ray'], ['uhd', '4K UHD']], e.format || '')}
     ${select('standard', 'Video standard', [['', 'Unknown'], ['PAL', 'PAL'], ['NTSC', 'NTSC']], e.standard)}
     ${select('anamorphic', 'Anamorphic 16:9', [['', 'Unknown / n.a.'], ['1', 'Yes'], ['0', 'No (letterboxed)']], e.anamorphic == null ? '' : e.anamorphic ? '1' : '0')}
     ${field('release_year', 'Release year', { type: 'number', value: e.release_year ?? '', attrs: 'min="1995" max="2100" inputmode="numeric"' })}
@@ -185,7 +186,7 @@ export function editionFields(e = {}, labels = []) {
 
 export function readEdition(v) {
   return {
-    label_name: v.label_name, cat_no: v.cat_no, spine_no: v.spine_no, region: v.region.replace(/\s/g, ''), standard: v.standard,
+    label_name: v.label_name, cat_no: v.cat_no, spine_no: v.spine_no, region: v.region.replace(/\s/g, ''), standard: v.standard, format: v.format || '',
     anamorphic: v.anamorphic === '' ? null : v.anamorphic === '1', release_year: v.release_year, discs: v.discs || 1, disc_type: v.disc_type,
     packaging: v.packaging, barcode: v.barcode.replace(/\s/g, ''), oop: v.oop === '1', audio: v.audio, subtitles: v.subtitles,
     extras: v.extras.split('\n').map((s) => s.trim()).filter(Boolean), notes: v.notes

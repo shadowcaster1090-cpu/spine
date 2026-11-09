@@ -44,7 +44,8 @@ export default async function ({ el, needLogin, go }) {
   function row(it, i) {
     const e = it.edition;
     const head = e ? `<a href="/release/${e.id}">${cover(e)}</a><div><a class="t" href="/release/${e.id}">${esc(e.title)}</a><div class="s"><span>${esc(e.label || '')} ${esc(e.cat_no || '')}</span>${regTag(e)}<span class="mono">${esc(it.code)}</span></div>`
-      : `<div class="cv gen" style="display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--dim)">?</div><div><div class="t">${it.state === 'looking' ? 'Looking up…' : 'Not on the register'}</div><div class="s"><span class="mono">${esc(it.code)}</span></div>`;
+      : `<div class="cv gen" style="display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--dim)">?</div><div><div class="t">${it.state === 'looking' ? 'Looking up…' : it.state === 'searching' ? 'Checking barcode databases…' : 'Not on the register'}</div><div class="s"><span class="mono">${esc(it.code)}</span></div>`;
+    if (it.state === 'found') return suggestionRow(it, i);
     const chip = {
       looking: '', added: '<span class="status approved">On your shelf</span>', wanted: '<span class="status approved">Wanted</span>',
       already: '<span class="status pending">Already on your shelf</span>', owned: '<span class="status pending">You own this</span>',
@@ -58,10 +59,39 @@ export default async function ({ el, needLogin, go }) {
       error: `<button class="btn sm" data-retry="${i}">Try again</button>`
     }[it.state] || '';
     const choices = it.state === 'multiple' ? `<div class="pick" style="margin-top:8px">${it.choices.map((c, k) => `<button data-choose="${i}:${k}"><span><b>${esc(c.label || '')}</b> <span class="dim">${esc(c.cat_no)} · ${esc(c.packaging || '')}</span></span>${regTag(c)}</button>`).join('')}</div>` : '';
-    const note = it.state === 'unknown' ? '<p class="dim" style="margin:6px 0 0;font-size:13px">Add its details once and it goes on your shelf; everyone else can scan it after that.</p>'
+    const note = it.state === 'unknown' ? '<p class="dim" style="margin:6px 0 0;font-size:13px">The barcode databases don’t know this one. Add its details once and it goes on your shelf; everyone else can scan it after that.</p>'
       : it.state === 'pending' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${it.mine ? 'You already submitted this edition. It will go on your shelf when a moderator approves it.' : 'Someone has submitted this edition. Scan it again once it’s approved.'}</p>` : '';
     return `<div class="wrow scanrow">${head}<div class="s" style="margin-top:6px">${chip}</div>${note}${choices}</div><div class="act btns">${acts}</div></div>`;
   }
+  const FORMAT = { dvd: 'DVD', bluray: 'Blu-ray', uhd: '4K UHD' };
+  function suggestionRow(it, i) {
+    const f = it.found, film = f.film, p = f.parsed;
+    const title = film?.title || p.title || f.product.title;
+    const src = it.coverUrl || film?.poster_url || '';
+    const img = src ? `<div class="cv"><img src="/api/img?u=${encodeURIComponent(src)}" alt="" loading="lazy"></div>` : `<div class="cv gen" style="display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--dim)">?</div>`;
+    const facts = [p.label, FORMAT[p.format], p.region ? `Region ${p.region}${p.standard ? ' ' + p.standard : ''}` : '', p.discs ? `${p.discs} discs` : '', ...p.edition].filter(Boolean);
+    return `<div class="wrow scanrow">${img}<div>
+        <div class="t">${esc(title)}${film?.year ? ` <span class="dim" style="font-family:var(--font);font-size:13px">${film.year}</span>` : ''}</div>
+        <div class="s">${film ? `<span class="status approved">Matched on TMDB</span>` : `<span class="status pending">Film not matched</span>`}<span class="mono dim">${esc(f.product.title.slice(0, 70))}</span></div>
+        <div class="s" style="margin-top:6px">${facts.map((x) => `<span class="tag">${esc(x)}</span>`).join(' ')}</div>
+        ${f.product.images?.length > 1 ? `<div class="s" style="margin-top:6px;gap:4px">${f.product.images.slice(0, 5).map((u, k) => `<button type="button" class="link" data-cover="${i}:${k}" style="font-size:12px">${k === 0 ? 'Cover 1' : 'Cover ' + (k + 1)}</button>`).join('')}</div>` : ''}
+      </div><div class="act btns">
+        <button class="btn sm primary" data-create="${i}">${film || p.title ? (S.mode === 'want' ? 'Add to wantlist' : 'Add to shelf') : 'Add…'}</button>
+        <a class="btn sm" href="${addLink(it)}">Edit details</a>
+      </div></div>`;
+  }
+  const addLink = (it) => {
+    const f = it.found, p = f.parsed || {}, q = new URLSearchParams({ barcode: it.code, own: S.mode === 'shelf' ? 1 : 0, back: 'scan' });
+    if (f.film?.tmdb_id) q.set('tmdb', f.film.tmdb_id);
+    if (f.existing_film_id) q.set('film', f.existing_film_id);
+    if (p.label) q.set('label', p.label);
+    if (p.region) q.set('region', p.region);
+    if (p.standard) q.set('standard', p.standard);
+    if (p.format) q.set('format', p.format);
+    if (p.title) q.set('title', p.title);
+    if (it.coverUrl) q.set('cover_url', it.coverUrl);
+    return '/add?' + q;
+  };
   const paint = () => {
     $('#items', el).innerHTML = S.items.length ? S.items.map(row).join('') : '<p class="dim" style="padding:16px 0">Nothing scanned yet.</p>';
     const n = S.items.filter((i) => i.state === 'added').length, w = S.items.filter((i) => i.state === 'wanted').length;
@@ -108,10 +138,16 @@ export default async function ({ el, needLogin, go }) {
         else await addEdition(it, it.edition);
       } else if (r.items.length > 1) { it.state = 'multiple'; it.choices = r.items; it.edition = { ...r.items[0], label: '', cat_no: '' }; }
       else if (r.pending) { it.state = 'pending'; it.mine = r.pending.mine; }
-      else it.state = 'unknown';
-      const t = it.edition?.title;
-      flash(it.state === 'added' ? `Added: ${t}` : it.state === 'wanted' ? `Wanted: ${t}` : it.state === 'already' ? `Already on your shelf: ${t}` : it.state === 'unknown' ? 'Not on the register yet' : it.state === 'multiple' ? 'Pick the edition' : t || 'Scanned', ['added', 'wanted'].includes(it.state));
-      if (!['added', 'wanted'].includes(it.state)) feedback(false);
+      else {
+        // Not on the register yet: ask the barcode databases and TMDB what it is.
+        it.state = 'searching'; paint();
+        const found = await get(`/api/barcode/${code}/lookup`).catch(() => null);
+        if (found?.product) { it.state = 'found'; it.found = found; it.coverUrl = found.product.images?.[0] || ''; }
+        else it.state = 'unknown';
+      }
+      const t = it.edition?.title || it.found?.film?.title || it.found?.parsed?.title;
+      flash(it.state === 'added' ? `Added: ${t}` : it.state === 'wanted' ? `Wanted: ${t}` : it.state === 'already' ? `Already on your shelf: ${t}` : it.state === 'found' ? `Found: ${t}` : it.state === 'unknown' ? 'Not on the register yet' : it.state === 'multiple' ? 'Pick the edition' : t || 'Scanned', ['added', 'wanted'].includes(it.state));
+      if (!['added', 'wanted', 'found'].includes(it.state)) feedback(false);
     } catch (e) { it.state = 'error'; it.error = e.message; feedback(false); }
     busy.delete(code);
     paint();
@@ -166,6 +202,20 @@ export default async function ({ el, needLogin, go }) {
       }
       if (b.dataset.again) { const it = S.items[+b.dataset.again]; S.mode = 'shelf'; paintMode(); const r = await post('/api/copies', { edition_id: it.edition.id }); it.copyId = r.copy.id; it.state = 'added'; paint(); toast('Another copy added'); }
       if (b.dataset.retry) handle(S.items[+b.dataset.retry].code, false);
+      if (b.dataset.cover) { const [i, k] = b.dataset.cover.split(':').map(Number); const it = S.items[i]; it.coverUrl = it.found.product.images[k]; paint(); }
+      if (b.dataset.create) {
+        const it = S.items[+b.dataset.create], f = it.found, p = f.parsed;
+        if (!f.film && !f.existing_film_id && !p.title) { go(addLink(it)); return; }
+        b.disabled = true; b.textContent = 'Adding…';
+        const r = await post(`/api/barcode/${it.code}/create`, {
+          tmdb_id: f.film?.tmdb_id || null, film_id: f.existing_film_id || null, film: !f.film && !f.existing_film_id ? { title: p.title, year: p.year } : null,
+          cover_url: it.coverUrl || '', source: f.product.source, add_to: S.mode,
+          edition: { label_name: p.label, region: p.region, standard: p.standard, format: p.format, discs: p.discs || 1, notes: p.edition.join(', ') }
+        });
+        it.edition = r.edition; delete it.found;
+        if (S.mode === 'shelf') { me.copies.add(r.edition.id); it.copyId = r.copy?.id; it.state = 'added'; } else { me.wants.add(r.edition.id); it.state = 'wanted'; }
+        feedback(true); paint(); toast(`${r.edition.title} is on the register${r.cover ? ' with its cover' : ''}`);
+      }
       if (b.dataset.choose) {
         const [i, k] = b.dataset.choose.split(':').map(Number), it = S.items[i];
         it.edition = it.choices[k]; delete it.choices;
@@ -176,9 +226,10 @@ export default async function ({ el, needLogin, go }) {
   };
 
   // Back from adding an unknown disc: look those codes up again.
-  for (const it of S.items.filter((x) => ['unknown', 'pending', 'looking'].includes(x.state))) {
+  for (const it of S.items.filter((x) => ['unknown', 'pending', 'looking', 'searching', 'found'].includes(x.state))) {
     get(`/api/barcode/${it.code}`).then((r) => {
-      if (r.items.length === 1) { it.edition = r.items[0]; it.state = me.copies.has(it.edition.id) ? 'added' : 'unknown'; if (it.state === 'unknown') return handle(it.code, false); }
+      if (r.items.length === 1) { it.edition = r.items[0]; delete it.found; it.state = me.copies.has(it.edition.id) ? 'added' : 'unknown'; if (it.state === 'unknown') return handle(it.code, false); }
+      else if (!r.items.length && !r.pending && it.state !== 'found') return handle(it.code, false);
       else if (r.pending) { it.state = 'pending'; it.mine = r.pending.mine; }
       paint();
     }).catch(() => {});

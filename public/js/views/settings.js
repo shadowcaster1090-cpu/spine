@@ -50,6 +50,9 @@ export default async function view(ctx) {
 
     ${navigator.userAgent.includes('SpineApp') ? `<div class="group-title">This iPhone</div><div class="inset"><button class="row" id="chsrv"><span class="grow"><span class="t">Change server address</span><span class="s">${esc(location.origin)}</span></span><span class="chev">›</span></button></div>` : ''}
 
+    ${u.role === 'admin' ? `<div class="group-title">Register (admin)</div>
+    <div class="inset"><button class="row" id="posters"><span class="grow"><span class="t">Fetch real posters from TMDB</span><span class="s">Matches films without artwork and stores their posters, credits and synopses</span></span><span class="chev">›</span></button></div>` : ''}
+
     <div class="group-title">Delete account</div>
     <form class="inset" id="delacc" style="padding:16px"><p class="dim" style="font-size:14px">This removes your account, diary, collection, wantlist, reviews and lists for good. Editions you added to the register stay, without your name.</p>
       <div class="form" style="max-width:360px">${u.has_password ? field('password', 'Password to confirm', { type: 'password', attrs: 'required autocomplete="current-password"' }) : field('confirm', 'Type your username to confirm', { attrs: 'required autocomplete="off" autocapitalize="none"' })}<div class="err"></div><div><button class="btn danger" type="submit">Delete my account</button></div></div></form>
@@ -84,6 +87,22 @@ export default async function view(ctx) {
     applyTheme(b.dataset.t); $('#theme', el).querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
     await patch('/api/me', { theme: b.dataset.t }); await loadMe();
   };
+  $('#posters', el)?.addEventListener('click', async (ev) => {
+    const b = ev.currentTarget; b.disabled = true;
+    let total = 0, matched = 0, missed = [];
+    try {
+      for (let i = 0; i < 20; i++) {
+        const r = await post('/api/admin/posters', { limit: 40 });
+        total += r.done; matched += r.matched; missed = missed.concat(r.missed);
+        toast(`Posters: ${total} done, ${r.remaining} to go`);
+        if (!r.remaining || (!r.done && r.missed.length === 0)) break;
+        if (!r.done) break;
+      }
+      toast(`Done: ${total} films now have posters${missed.length ? `; ${missed.length} could not be matched` : ''}`);
+      if (missed.length) console.info('Not matched on TMDB:', missed);
+    } catch (e) { toast(e.message, true); }
+    b.disabled = false;
+  });
   $('#chsrv', el)?.addEventListener('click', () => { try { window.webkit.messageHandlers.spine.postMessage({ type: 'resetServer' }); } catch { toast('Not running in the Spine app', true); } });
   if (location.hash === '#favourites') setTimeout(() => $('#favourites', el)?.scrollIntoView({ block: 'start' }), 50);
 }

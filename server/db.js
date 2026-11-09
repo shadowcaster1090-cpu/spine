@@ -285,6 +285,18 @@ const MIGRATIONS = [
   // Generated cover palettes moved to a curated film-stock set; stored palettes fall back to the generator on read.
   `
   UPDATE films SET palette = NULL;
+  `,
+  // Real artwork and barcode lookups: film posters (from TMDB), edition format and provenance, a cache of provider answers.
+  `
+  ALTER TABLE films ADD COLUMN poster TEXT NOT NULL DEFAULT '';
+  ALTER TABLE films ADD COLUMN poster_path TEXT NOT NULL DEFAULT '';
+  ALTER TABLE editions ADD COLUMN format TEXT NOT NULL DEFAULT '';
+  ALTER TABLE editions ADD COLUMN provenance TEXT NOT NULL DEFAULT '';
+  CREATE TABLE barcode_cache (
+    code TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    fetched_at INTEGER NOT NULL
+  );
   `
 ];
 

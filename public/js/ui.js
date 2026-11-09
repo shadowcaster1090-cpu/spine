@@ -27,7 +27,9 @@ export const dateWords = (ymd) => {
   return d.toLocaleDateString('en-GB', { weekday: ymd > new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10) ? 'long' : undefined, day: 'numeric', month: 'short', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 };
 export const regionText = (r) => !r ? '?' : r === '0' ? '0' : r.replace(/,/g, '/');
-export const regTag = (e) => e.region || e.standard ? `<span class="reg r${esc((e.region || '').split(',')[0])}">R${esc(regionText(e.region))} ${esc(e.standard || '')}</span>` : '';
+export const FORMAT_NAMES = { dvd: 'DVD', bluray: 'Blu-ray', uhd: '4K UHD' };
+export const fmtTag = (e) => e.format && e.format !== 'dvd' ? `<span class="reg fmt ${esc(e.format)}">${esc(FORMAT_NAMES[e.format] || e.format)}</span>` : '';
+export const regTag = (e) => (e.region || e.standard ? `<span class="reg r${esc((e.region || '').split(',')[0])}">R${esc(regionText(e.region))} ${esc(e.standard || '')}</span>` : '') + fmtTag(e);
 export const condTag = (c) => c ? `<span class="cond ${c.replace('+', 'p')}">${esc(c)}</span>` : '';
 export const CONDITIONS = [['', '—'], ['M', 'Mint'], ['NM', 'Near Mint'], ['VG+', 'Very Good Plus'], ['VG', 'Very Good'], ['G', 'Good'], ['F', 'Fair'], ['P', 'Poor']];
 export const VIA_NAMES = { dvd: 'my DVD', netflix: 'Netflix', prime: 'Prime Video', disney: 'Disney+', apple: 'Apple TV', mubi: 'MUBI', bfi: 'BFI Player', cinema: 'the cinema', tv: 'TV', other: 'elsewhere' };

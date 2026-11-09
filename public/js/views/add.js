@@ -8,7 +8,8 @@ export default async function ({ el, query, go, needLogin }) {
   if (!me.user) return needLogin();
   setTitle('Add an edition');
   const own = query.get('own') !== '0', back = query.get('back') === 'scan' ? '/scan' : null;
-  const state = { barcode: query.get('barcode') || '', film: null, newFilm: null, label: query.get('label') || '', spine: query.get('spine') || '' };
+  const state = { barcode: query.get('barcode') || '', film: null, newFilm: null, label: query.get('label') || '', spine: query.get('spine') || '',
+    region: query.get('region') || '', standard: query.get('standard') || '', format: query.get('format') || '', coverUrl: query.get('cover_url') || '', title: query.get('title') || '' };
   let stopScan = null;
   const stop = () => { if (stopScan) { stopScan(); stopScan = null; } };
 
@@ -108,7 +109,8 @@ export default async function ({ el, query, go, needLogin }) {
     frame('details', `<form class="form" novalidate>
       ${f ? `<div class="panel" style="display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap"><div><div class="eyebrow">Film</div><div style="font-family:var(--display);font-size:28px;font-style:italic">${esc(f.title)}</div><div class="dim">${f.directors.map((d) => esc(d.name)).join(', ')}${f.year ? ' · ' + f.year : ''}</div></div><button class="btn sm ghost" type="button" id="chfilm">Change film</button></div>`
         : `<div class="panel"><div class="eyebrow" style="margin-bottom:14px">New film${state.newFilm?.tmdb_id ? ' · details from TMDB, check them' : ''}</div><div class="form cols">${filmFields(state.newFilm || {})}</div></div>`}
-      <div class="panel"><div class="eyebrow" style="margin-bottom:14px">This edition · copy what is printed on the case</div><div class="form cols">${editionFields({ barcode: state.barcode, label_name: state.label, spine_no: state.spine, discs: 1 }, labels)}</div></div>
+      <div class="panel"><div class="eyebrow" style="margin-bottom:14px">This edition · copy what is printed on the case</div><div class="form cols">${editionFields({ barcode: state.barcode, label_name: state.label, region: state.region, standard: state.standard, format: state.format, spine_no: state.spine, discs: 1 }, labels)}</div></div>
+      ${state.coverUrl ? `<div class="panel" style="display:flex;gap:16px;align-items:center"><div class="cv" style="width:64px"><img src="/api/img?u=${encodeURIComponent(state.coverUrl)}" alt=""></div><div><div class="eyebrow">Cover from the barcode lookup</div><p class="dim" style="margin:4px 0 0;font-size:13px">Saved with the edition. You can replace it on the edition page.</p></div></div>` : ''}
       <label class="check"><input type="checkbox" name="own" value="1" ${own ? 'checked' : ''}> I own this edition: put it on my shelf ${me.user.role === 'member' ? 'once a moderator approves it' : ''}</label>
       <div class="err"></div>
       <div class="btns"><button class="btn primary" type="submit">${me.user.role === 'member' ? 'Submit for review' : 'Add to the register'}</button><button class="btn ghost" type="button" id="back">Back</button></div></form>`);
@@ -123,6 +125,7 @@ export default async function ({ el, query, go, needLogin }) {
       payload.add_to_shelf = !!v.own;
       const r = await post('/api/submissions', { kind: 'edition', payload });
       if (r.status === 'approved' && v.own) { me.copies.add(r.result_id); me.wants.delete(r.result_id); }
+      if (r.status === 'approved' && r.result_id && state.coverUrl) await post(`/api/editions/${r.result_id}/cover-from-url`, { url: state.coverUrl }).catch(() => {});
       submitted(el, r, back || (r.result_id ? `/release/${r.result_id}` : '/contributions'), go, back ? 'Back to scanning' : 'Back');
     });
   }
@@ -130,6 +133,15 @@ export default async function ({ el, query, go, needLogin }) {
   if (query.get('film')) {
     state.film = (await get(`/api/films/${query.get('film')}`)).film;
     await detailsStep();
+  } else if (query.get('tmdb')) {
+    try {
+      const r = await get(`/api/tmdb/movie/${query.get('tmdb')}`);
+      if (r.existing_film_id) state.film = (await get(`/api/films/${r.existing_film_id}`)).film; else state.newFilm = r.film;
+      await detailsStep();
+    } catch { filmStep(); }
+  } else if (state.title) {
+    state.newFilm = { title: state.title };
+    filmStep(); const inp = $('#f-fq', el); if (inp) { inp.value = state.title; inp.dispatchEvent(new Event('input')); }
   } else if (state.label) {
     filmStep();
   } else scanStep();

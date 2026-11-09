@@ -1,14 +1,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt, filmCards, searchFilms, filmsById, watchRows } from '../catalogue.js';
+import { searchEditions, getEdition, getFilmRow, cards, mergeEditions, barcodeAlt, filmCards, searchFilms, filmsById, watchRows, findOrCreateFilm, cleanEdition, reindex, reindexFilm, setDirectors } from '../catalogue.js';
+import { tmdbClient, movieDetails, matchMovie, fetchImageToUploads, posterUrl, MAGIC } from '../tmdb.js';
+import { suggestFromBarcode } from '../lookup.js';
+import { tx, v } from '../db.js';
 import { requireUser, requireMod, isMod } from '../auth.js';
-
-const MAGIC = [
-  { ext: '.jpg', test: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  { ext: '.png', test: (b) => b.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
-  { ext: '.webp', test: (b) => b.slice(0, 4).toString() === 'RIFF' && b.slice(8, 12).toString() === 'WEBP' }
-];
 
 export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
   r.get('/api/home', ({ user }) => {
@@ -179,17 +176,8 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
   });
 
   /* TMDB lookups for adding films. Needs TMDB_API_KEY (v3 key or v4 read token). */
-  async function tmdb(pathname, params = {}) {
-    if (!tmdbKey) fail(501, 'Film lookup is off. Set TMDB_API_KEY on the server to turn it on.');
-    const u = new URL('https://api.themoviedb.org/3' + pathname);
-    for (const [k, val] of Object.entries(params)) u.searchParams.set(k, val);
-    const headers = { accept: 'application/json' };
-    if (tmdbKey.length > 40) headers.authorization = 'Bearer ' + tmdbKey; else u.searchParams.set('api_key', tmdbKey);
-    let res;
-    try { res = await fetch(u, { headers, signal: AbortSignal.timeout(8000) }); } catch { fail(502, 'Could not reach TMDB. Try again shortly.'); }
-    if (!res.ok) fail(502, `TMDB answered ${res.status}.`);
-    return res.json();
-  }
+  const tmdbc = tmdbClient(tmdbKey);
+  const tmdb = (pathname, params) => tmdbc.get(pathname, params).catch((e) => fail(e.status || 502, e.message));
 
   r.get('/api/tmdb/search', async ({ query, user }) => {
     requireUser(user);
@@ -206,18 +194,142 @@ export default function (r, { db, fail, rateLimit, uploadsDir, tmdbKey }) {
 
   r.get('/api/tmdb/movie/:id', async ({ params, user }) => {
     requireUser(user);
-    const m = await tmdb(`/movie/${+params.id}`, { append_to_response: 'credits' });
-    const existing = db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(m.id);
+    const film = await movieDetails(tmdbc, +params.id).catch((e) => fail(e.status || 502, e.message));
+    const existing = db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(film.tmdb_id);
+    return { existing_film_id: existing ? existing.id : null, film: { ...film, poster_url: posterUrl(film.poster_path, 'w342') } };
+  });
+
+  /* ---------- barcode lookup: product services + TMDB, then one tap to the register ---------- */
+  r.get('/api/barcode/:code/lookup', async ({ params, query, user, ip }) => {
+    requireUser(user);
+    rateLimit(String(user.id), 'lookup', 120, 60 * 60e3);
+    rateLimit(ip, 'lookup-ip', 300, 60 * 60e3);
+    const code = params.code.replace(/\D/g, '');
+    if (code.length < 8 || code.length > 14) fail(400, 'A barcode is 8 to 14 digits.');
+    const s = await suggestFromBarcode(db, tmdbc, code, { force: query.get('force') === '1' && isMod(user) });
+    let existing = null;
+    if (s.film?.tmdb_id) existing = db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(s.film.tmdb_id)?.id || null;
+    if (!existing && s.parsed?.title) existing = db.prepare('SELECT id FROM films WHERE title = ? COLLATE NOCASE AND (? IS NULL OR year IS NULL OR year = ?)').get(s.parsed.title, v(s.parsed.year), v(s.parsed.year))?.id || null;
     return {
-      existing_film_id: existing ? existing.id : null,
-      film: {
-        tmdb_id: m.id, title: m.title, original_title: m.original_title !== m.title ? m.original_title : '',
-        year: m.release_date ? +m.release_date.slice(0, 4) : null,
-        country: m.production_countries?.[0]?.name || '',
-        language: m.spoken_languages?.find((l) => l.iso_639_1 === m.original_language)?.english_name || m.spoken_languages?.[0]?.english_name || '',
-        runtime: m.runtime || null, aspect: '', synopsis: m.overview || '',
-        directors: (m.credits?.crew || []).filter((c) => c.job === 'Director').map((c) => c.name)
-      }
+      code, ...s, tmdb: tmdbc.enabled, existing_film_id: existing,
+      film: s.film ? { ...s.film, poster_url: posterUrl(s.film.poster_path, 'w342') } : null
     };
+  });
+
+  // Creates the film (from TMDB or the given fields) and the edition in one go, with the retailer's cover
+  // and the film's poster fetched in the background of the request. Used by the scanner's "Add to shelf".
+  r.post('/api/barcode/:code/create', async ({ params, body, user }) => {
+    requireUser(user);
+    rateLimit(String(user.id), 'submit', 120, 60 * 60e3);
+    const code = params.code.replace(/\D/g, '');
+    if (code.length < 8 || code.length > 14) fail(400, 'A barcode is 8 to 14 digits.');
+    const dupe = db.prepare('SELECT id FROM editions WHERE barcode IN (?, ?) AND merged_into IS NULL').get(code, barcodeAlt(code));
+    if (dupe) fail(409, `That barcode is already on the register (#${dupe.id}).`);
+    // Film: an existing one, a TMDB id (details fetched here so the client cannot invent them), or typed fields.
+    let filmInput;
+    if (body.film_id) filmInput = { film_id: +body.film_id };
+    else if (body.tmdb_id) {
+      const existing = db.prepare('SELECT id FROM films WHERE tmdb_id = ?').get(+body.tmdb_id);
+      filmInput = existing ? { film_id: existing.id } : { film: await movieDetails(tmdbc, +body.tmdb_id).catch((e) => fail(e.status || 502, e.message)) };
+    } else if (body.film && body.film.title) filmInput = { film: body.film };
+    else fail(400, 'Say which film this disc is: pick the match, or type a title.');
+    const e = cleanEdition({ ...body.edition, barcode: code });
+    if (!e.label_name) e.label_name = 'Unknown label';
+    if (!e.region) e.region = '0';
+    const coverUrl = typeof body.cover_url === 'string' && /^https?:\/\//.test(body.cover_url) ? body.cover_url : '';
+    const provenance = String(body.source || 'barcode').slice(0, 40);
+
+    const { editionId, filmId, created } = tx(db, () => {
+      const film = findOrCreateFilm(db, filmInput);
+      const lid = e.label_name ? (db.prepare('INSERT INTO labels (name) VALUES (?) ON CONFLICT(name) DO NOTHING').run(e.label_name), db.prepare('SELECT id FROM labels WHERE name = ?').get(e.label_name).id) : null;
+      const cols = ['cat_no', 'spine_no', 'region', 'standard', 'anamorphic', 'release_year', 'discs', 'disc_type', 'packaging', 'format', 'barcode', 'oop', 'audio', 'subtitles', 'extras', 'notes'];
+      const { lastInsertRowid } = db.prepare(`INSERT INTO editions (film_id, label_id, ${cols.join(', ')}, provenance, created_by) VALUES (?, ?, ${cols.map(() => '?').join(', ')}, ?, ?)`)
+        .run(film.id, lid, ...cols.map((k) => v(k === 'extras' ? JSON.stringify(e[k] || []) : e[k])), provenance, user.id);
+      const id = Number(lastInsertRowid);
+      reindex(db, id);
+      db.prepare("INSERT INTO revisions (entity, entity_id, user_id, summary, before, after) VALUES ('edition', ?, ?, ?, '{}', ?)").run(id, user.id, `Added from a scan (${provenance})`, JSON.stringify({ ...e, film_id: film.id }));
+      db.prepare("INSERT INTO submissions (user_id, kind, payload, status, reviewer_id, result_id, note, reviewed_at) VALUES (?, 'edition', ?, 'approved', ?, ?, 'Created from a barcode lookup', datetime('now'))")
+        .run(user.id, JSON.stringify({ ...e, film_id: film.id, barcode: code }), user.id, id);
+      if (body.add_to === 'shelf') { db.prepare('INSERT INTO copies (user_id, edition_id) VALUES (?, ?)').run(user.id, id); db.prepare('DELETE FROM wants WHERE user_id = ? AND edition_id = ?').run(user.id, id); }
+      if (body.add_to === 'want') db.prepare('INSERT OR IGNORE INTO wants (user_id, edition_id) VALUES (?, ?)').run(user.id, id);
+      return { editionId: id, filmId: film.id, created: film.created };
+    });
+
+    // Artwork, best effort: the retailer's cover for the edition, TMDB's poster for the film.
+    const filmRow = db.prepare('SELECT poster, poster_path FROM films WHERE id = ?').get(filmId);
+    const [coverFile, posterFile] = await Promise.all([
+      coverUrl ? fetchImageToUploads(coverUrl, uploadsDir) : null,
+      !filmRow.poster && filmRow.poster_path ? fetchImageToUploads(posterUrl(filmRow.poster_path, 'w780'), uploadsDir) : null
+    ]);
+    if (coverFile) {
+      const { lastInsertRowid } = db.prepare("INSERT INTO images (edition_id, user_id, file, kind) VALUES (?, ?, ?, 'front')").run(editionId, user.id, coverFile);
+      db.prepare('UPDATE editions SET cover_image_id = ? WHERE id = ?').run(lastInsertRowid, editionId);
+    }
+    if (posterFile) db.prepare('UPDATE films SET poster = ? WHERE id = ?').run(posterFile, filmId);
+    const copy = body.add_to === 'shelf' ? db.prepare('SELECT * FROM copies WHERE user_id = ? AND edition_id = ? ORDER BY id DESC').get(user.id, editionId) : null;
+    return { edition: cards(db, 'e.id = ?', [editionId], 'e.id', 1)[0], film_id: filmId, film_created: created, copy, cover: !!coverFile, poster: !!posterFile };
+  });
+
+  // Previews of artwork the lookup found, before anything is saved. Only URLs that a provider or TMDB
+  // actually returned can be fetched, so this is not a general proxy.
+  r.get('/api/img', async ({ query, res, user }) => {
+    requireUser(user);
+    const u = String(query.get('u') || '');
+    if (!/^https?:\/\/[^\s]+$/i.test(u) || u.length > 1000) fail(400, 'Bad image URL.');
+    const allowed = /^https:\/\/image\.tmdb\.org\//.test(u) || !!db.prepare("SELECT 1 FROM barcode_cache WHERE instr(data, ?) > 0 LIMIT 1").get(JSON.stringify(u).slice(1, -1));
+    if (!allowed) fail(403, 'That image was not part of a lookup.');
+    let r2;
+    try { r2 = await fetch(u, { signal: AbortSignal.timeout(10000), redirect: 'follow', headers: { accept: 'image/*', 'user-agent': 'Spine/1.0' } }); } catch { fail(502, 'Could not fetch the image.'); }
+    if (!r2.ok) fail(502, `Image host answered ${r2.status}.`);
+    const buf = Buffer.from(await r2.arrayBuffer());
+    const type = MAGIC.find((t) => t.test(buf));
+    if (!type || buf.length > 6e6) fail(415, 'Not an image.');
+    res.writeHead(200, { 'Content-Type': type.ext === '.jpg' ? 'image/jpeg' : type.ext === '.png' ? 'image/png' : 'image/webp', 'Cache-Control': 'private, max-age=86400', 'Content-Length': buf.length, 'X-Content-Type-Options': 'nosniff' });
+    res.end(buf);
+  });
+
+  r.post('/api/editions/:id/cover-from-url', async ({ params, body, user }) => {
+    requireUser(user);
+    const id = +params.id;
+    const e = db.prepare('SELECT id, cover_image_id, merged_into FROM editions WHERE id = ?').get(id);
+    if (!e || e.merged_into) fail(404, 'That edition is not on the register.');
+    if (e.cover_image_id && !isMod(user)) fail(409, 'This edition already has a cover.');
+    const u = String(body.url || '');
+    const allowed = /^https:\/\/image\.tmdb\.org\//.test(u) || !!db.prepare('SELECT 1 FROM barcode_cache WHERE instr(data, ?) > 0 LIMIT 1').get(JSON.stringify(u).slice(1, -1));
+    if (!allowed) fail(403, 'That image was not part of a lookup.');
+    const file = await fetchImageToUploads(u, uploadsDir);
+    if (!file) fail(502, 'Could not fetch that image.');
+    const { lastInsertRowid } = db.prepare("INSERT INTO images (edition_id, user_id, file, kind) VALUES (?, ?, ?, 'front')").run(id, user.id, file);
+    db.prepare('UPDATE editions SET cover_image_id = ? WHERE id = ?').run(lastInsertRowid, id);
+    return { id: Number(lastInsertRowid), file };
+  });
+
+  // Admin: give existing films real posters (and TMDB ids, directors, synopses) from TMDB.
+  r.post('/api/admin/posters', async ({ user, body }) => {
+    requireMod(user);
+    if (!tmdbc.enabled) fail(501, 'Set TMDB_API_KEY on the server first.');
+    const limit = Math.min(+body.limit || 40, 100);
+    const rows = db.prepare("SELECT id, title, year, tmdb_id, poster_path FROM films WHERE poster = '' ORDER BY id LIMIT ?").all(limit);
+    let done = 0, matched = 0, missed = [];
+    for (const f of rows) {
+      try {
+        let details = null;
+        if (f.tmdb_id) details = await movieDetails(tmdbc, f.tmdb_id);
+        else {
+          const m = await matchMovie(tmdbc, f.title, f.year);
+          if (m) { details = await movieDetails(tmdbc, m.tmdb_id); matched++; }
+        }
+        if (!details) { missed.push(f.title); continue; }
+        const dup = db.prepare('SELECT id FROM films WHERE tmdb_id = ? AND id != ?').get(details.tmdb_id, f.id);
+        const file = details.poster_path ? await fetchImageToUploads(posterUrl(details.poster_path, 'w780'), uploadsDir) : null;
+        db.prepare(`UPDATE films SET poster = coalesce(?, poster), poster_path = ?, tmdb_id = coalesce(tmdb_id, ?), synopsis = CASE WHEN synopsis = '' THEN ? ELSE synopsis END,
+          runtime = coalesce(runtime, ?), country = CASE WHEN country = '' THEN ? ELSE country END, language = CASE WHEN language = '' THEN ? ELSE language END, original_title = CASE WHEN original_title = '' THEN ? ELSE original_title END WHERE id = ?`)
+          .run(file, details.poster_path, dup ? null : details.tmdb_id, details.synopsis, v(details.runtime), details.country, details.language, details.original_title, f.id);
+        if (!db.prepare('SELECT 1 FROM film_directors WHERE film_id = ?').get(f.id) && details.directors.length) { setDirectors(db, f.id, details.directors); reindexFilm(db, f.id); }
+        done++;
+      } catch (e) { missed.push(`${f.title} (${e.message})`); }
+    }
+    const remaining = db.prepare("SELECT count(*) n FROM films WHERE poster = ''").get().n;
+    return { done, matched, missed, remaining };
   });
 }
