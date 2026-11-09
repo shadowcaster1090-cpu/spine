@@ -127,7 +127,7 @@ export const LABELS = [
   [/\bentertainment one\b|\beone\b/i, 'Entertainment One'], [/\bsignature\b/i, 'Signature Entertainment'], [/\bthunderbird\b/i, 'Thunderbird'], [/\bkaleidoscope\b/i, 'Kaleidoscope']
 ];
 
-const FORMAT_WORDS = /\b(4k( ultra hd)?|uhd|ultra hd|blu[- ]?ray|\bbd\b|dvd|hd[- ]dvd|laserdisc|vhs)\b/i;
+const FORMAT_WORDS = /\b(4k( ultra hd)?( blu[- ]?ray)?|uhd( bd)?|ultra hd( blu[- ]?ray)?|blu[- ]?ray|\bbd\b|dvd|hd[- ]dvd|laserdisc|vhs|no standard)\b/gi;
 const NOISE = [
   /\b(uk|us|usa|import|imports|uk import|region[- ]?free|region ?[0-9abc](?:\/[0-9abc])*|all regions|multi[- ]region|ntsc|pal|widescreen|full ?screen|fullscreen|letterbox(ed)?|anamorphic|1080p|2160p|hdr|dolby|dts)\b/gi,
   /\b(new|sealed|brand new|used|very good|like new|pre-?owned|free (uk )?(p&p|shipping|postage)|fast dispatch)\b/gi,
@@ -212,8 +212,9 @@ export function parseProductTitle(raw, { brand = '', code = '', alternatives = [
   let s = String(raw || '').replace(/[“”"]/g, '').replace(/&amp;/g, '&');
   const facts = { year: null, format: formatOf(s), label: '', region: '', discs: null, edition: [] };
   // Facts first, then strip.
-  const yearM = s.match(/[(\[]\s*((?:19|20)\d{2})\s*[)\]]/) || s.match(/\b((?:19|20)\d{2})\b(?!\s*(?:disc|p\b))/);
-  if (yearM) facts.year = +yearM[1];
+  // A year in brackets is the film's; a bare one only counts if it could be a real year ("2049" is a title).
+  const yearM = s.match(/[(\[]\s*((?:19|20)\d{2})\s*[)\]]/) || s.match(/(?:^|[\s,-])((?:19|20)\d{2})\s*$/);
+  if (yearM && +yearM[1] <= new Date().getFullYear() + 1) facts.year = +yearM[1];
   const regionM = s.match(/region\s*([0-9abc])/i);
   if (regionM) facts.region = regionM[1].toUpperCase();
   const discsM = s.match(/\b(\d+|two|three|four|five|six)[- ]disc/i);
@@ -223,12 +224,13 @@ export function parseProductTitle(raw, { brand = '', code = '', alternatives = [
   // "Surname, Firstname-Title" (a retailer habit) → drop the name.
   s = s.replace(/^[A-Z][\w'.]+,\s*[A-Z][\w'.]+(?: [A-Z][\w'.]+)?-(?=\S)/, '');
   // Bracketed chunks are nearly always packaging facts; keep one only if it is the whole title.
-  const stripped = s.replace(/\s*[\[(][^\])]*[\])]\s*/g, ' ');
+  // An unclosed bracket (retail titles get truncated) takes the rest of the line with it.
+  const stripped = s.replace(/\s*[\[(][^\])]*[\])]\s*/g, ' ').replace(/\s*[\[(][^\])]*$/, ' ');
   if (tidy(stripped)) s = stripped;
   s = s.replace(LABEL_WORDS, ' ');
   s = s.replace(FORMAT_WORDS, ' ');
   for (const re of NOISE) s = s.replace(re, ' ');
-  s = s.replace(/\b(19|20)\d{2}\b/g, ' ');
+  if (facts.year) s = s.replace(new RegExp('(?:^|[\\s,-])' + facts.year + '\\s*$'), ' ');
   s = s.replace(/\s[-–—:|/]\s.*$/, (m) => (m.length > s.length * .6 ? ' ' : m)); // a long tail after a dash is usually a subtitle: keep; a short one is noise
   s = tidy(s).replace(/\s*[-–—:,;]+\s*$/, '');
   // A trailing "the" from "Holiday, The"
@@ -246,8 +248,29 @@ export function parseProductTitle(raw, { brand = '', code = '', alternatives = [
 /* ---------- the whole thing ---------- */
 export async function suggestFromBarcode(db, tmdb, code, { fetchImpl = fetch, force = false } = {}) {
   const looked = await lookupProduct(db, code, { fetchImpl, force });
-  const product = looked.product;
-  if (!product) return { product: null, parsed: null, film: null, errors: looked.errors, cached: looked.cached };
+  if (looked.errors?.length) console.warn(`barcode ${code}: ${looked.errors.join('; ')}`);
+  return suggestFromProduct(db, tmdb, code, looked.product, { errors: looked.errors, cached: looked.cached });
+}
+
+// A product the phone fetched itself (each phone has its own daily allowance with the barcode
+// services, where a server's shared address runs out). Cleaned, remembered, then treated like ours.
+export function acceptClientProduct(db, code, raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const str = (x, n) => (typeof x === 'string' ? x.trim().slice(0, n) : '');
+  const product = {
+    source: ['upcitemdb', 'openproductsfacts', 'upcdatabase'].includes(raw.source) ? raw.source : 'client',
+    code, title: str(raw.title, 200), brand: str(raw.brand, 100), description: str(raw.description, 2000), category: str(raw.category, 200),
+    images: (Array.isArray(raw.images) ? raw.images : []).filter((u) => typeof u === 'string' && /^https?:\/\/[^\s"']+$/.test(u) && u.length < 600).slice(0, 8),
+    titles: (Array.isArray(raw.titles) ? raw.titles : []).filter((t) => typeof t === 'string').map((t) => t.trim().slice(0, 200)).filter(Boolean).slice(0, 10)
+  };
+  if (!product.title && !product.titles.length) return null;
+  db.prepare('INSERT INTO barcode_cache (code, data, fetched_at) VALUES (?, ?, ?) ON CONFLICT(code) DO UPDATE SET data = excluded.data, fetched_at = excluded.fetched_at')
+    .run(String(code).replace(/\D/g, ''), JSON.stringify({ product, errors: [] }), Date.now());
+  return product;
+}
+
+export async function suggestFromProduct(db, tmdb, code, product, { errors = [], cached = false } = {}) {
+  if (!product) return { product: null, parsed: null, film: null, errors, cached };
   const parsed = parseProductTitle(product.title, { brand: product.brand, code, alternatives: product.titles });
   let film = null;
   if (tmdb.enabled && parsed.title) {
@@ -256,5 +279,5 @@ export async function suggestFromBarcode(db, tmdb, code, { fetchImpl = fetch, fo
       if (!film) for (const alt of parsed.alternatives.slice(0, 2)) { film = await matchMovie(tmdb, alt, parsed.year); if (film) break; }
     } catch { film = null; }
   }
-  return { product: { source: product.source, title: product.title, brand: product.brand, description: product.description, images: product.images.slice(0, 6) }, parsed, film, errors: looked.errors, cached: looked.cached };
+  return { product: { source: product.source, title: product.title, brand: product.brand, description: product.description, images: product.images.slice(0, 6) }, parsed, film, errors, cached };
 }

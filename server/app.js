@@ -35,7 +35,7 @@ const CSP = [
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data: blob:",
   "media-src 'self' blob:",
-  "connect-src 'self'",
+  "connect-src 'self' https://api.upcitemdb.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'"

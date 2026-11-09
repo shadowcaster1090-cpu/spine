@@ -44,22 +44,24 @@ export default async function ({ el, needLogin, go }) {
   function row(it, i) {
     const e = it.edition;
     const head = e ? `<a href="/release/${e.id}">${cover(e)}</a><div><a class="t" href="/release/${e.id}">${esc(e.title)}</a><div class="s"><span>${esc(e.label || '')} ${esc(e.cat_no || '')}</span>${regTag(e)}<span class="mono">${esc(it.code)}</span></div>`
-      : `<div class="cv gen" style="display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--dim)">?</div><div><div class="t">${it.state === 'looking' ? 'Looking up…' : it.state === 'searching' ? 'Checking barcode databases…' : 'Not on the register'}</div><div class="s"><span class="mono">${esc(it.code)}</span></div>`;
+      : `<div class="cv gen" style="display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--dim)">?</div><div><div class="t">${it.state === 'looking' ? 'Looking up…' : it.state === 'searching' ? 'Checking barcode databases…' : it.state === 'nolookup' ? 'Couldn’t look this up yet' : 'Not on the register'}</div><div class="s"><span class="mono">${esc(it.code)}</span></div>`;
     if (it.state === 'found') return suggestionRow(it, i);
     const chip = {
       looking: '', added: '<span class="status approved">On your shelf</span>', wanted: '<span class="status approved">Wanted</span>',
       already: '<span class="status pending">Already on your shelf</span>', owned: '<span class="status pending">You own this</span>',
-      multiple: `<span class="status pending">${it.choices?.length} editions share this barcode</span>`, unknown: '', pending: '<span class="status pending">Waiting for review</span>', error: `<span class="status rejected">${esc(it.error || 'Failed')}</span>`
+      multiple: `<span class="status pending">${it.choices?.length} editions share this barcode</span>`, unknown: '', nolookup: '<span class="status pending">Lookup unavailable</span>', pending: '<span class="status pending">Waiting for review</span>', error: `<span class="status rejected">${esc(it.error || 'Failed')}</span>`
     }[it.state] || '';
     const acts = {
       added: it.copyId ? `<button class="btn sm" data-grade="${i}">Grade</button><button class="link" data-undo="${i}">Undo</button>` : '',
       wanted: `<button class="link" data-undo="${i}">Undo</button>`,
       already: `<button class="btn sm" data-again="${i}">Add another copy</button>`,
       unknown: `<a class="btn sm primary" href="/add?barcode=${esc(it.code)}&own=${S.mode === 'shelf' ? 1 : 0}&back=scan">Add it</a>`,
+      nolookup: `<button class="btn sm primary" data-retry="${i}">Try again</button><a class="btn sm" href="/add?barcode=${esc(it.code)}&own=${S.mode === 'shelf' ? 1 : 0}&back=scan">Add by hand</a>`,
       error: `<button class="btn sm" data-retry="${i}">Try again</button>`
     }[it.state] || '';
     const choices = it.state === 'multiple' ? `<div class="pick" style="margin-top:8px">${it.choices.map((c, k) => `<button data-choose="${i}:${k}"><span><b>${esc(c.label || '')}</b> <span class="dim">${esc(c.cat_no)} · ${esc(c.packaging || '')}</span></span>${regTag(c)}</button>`).join('')}</div>` : '';
     const note = it.state === 'unknown' ? '<p class="dim" style="margin:6px 0 0;font-size:13px">The barcode databases don’t know this one. Add its details once and it goes on your shelf; everyone else can scan it after that.</p>'
+      : it.state === 'nolookup' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${esc(it.error || 'The barcode services could not be reached.')} The code is kept here; try again in a moment.</p>`
       : it.state === 'pending' ? `<p class="dim" style="margin:6px 0 0;font-size:13px">${it.mine ? 'You already submitted this edition. It will go on your shelf when a moderator approves it.' : 'Someone has submitted this edition. Scan it again once it’s approved.'}</p>` : '';
     return `<div class="wrow scanrow">${head}<div class="s" style="margin-top:6px">${chip}</div>${note}${choices}</div><div class="act btns">${acts}</div></div>`;
   }
@@ -141,8 +143,9 @@ export default async function ({ el, needLogin, go }) {
       else {
         // Not on the register yet: ask the barcode databases and TMDB what it is.
         it.state = 'searching'; paint();
-        const found = await get(`/api/barcode/${code}/lookup`).catch(() => null);
+        const found = await identify(code);
         if (found?.product) { it.state = 'found'; it.found = found; it.coverUrl = found.product.images?.[0] || ''; }
+        else if (found?.trouble) { it.state = 'nolookup'; it.error = found.trouble; }
         else it.state = 'unknown';
       }
       const t = it.edition?.title || it.found?.film?.title || it.found?.parsed?.title;
@@ -151,6 +154,30 @@ export default async function ({ el, needLogin, go }) {
     } catch (e) { it.state = 'error'; it.error = e.message; feedback(false); }
     busy.delete(code);
     paint();
+  }
+
+  // Barcode services ration lookups per internet address, so the phone asks first (its own allowance);
+  // the server asks only when the phone cannot. Either way the server reads the answer and finds the film.
+  async function identify(code) {
+    let trouble = '';
+    try {
+      const r = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(7000) });
+      if (r.status === 429) trouble = 'UPCitemdb has had its 100 free lookups from this connection today.';
+      else if (r.ok) {
+        const data = await r.json();
+        const item = (data.items || [])[0];
+        if (item) {
+          return await post(`/api/barcode/${code}/identify`, { product: { source: 'upcitemdb', title: item.title, brand: item.brand, description: item.description, category: item.category, images: item.images, titles: (item.offers || []).map((o) => o.title) } });
+        }
+        // Known to be unknown there; still let the server try its other sources.
+      } else if (r.status !== 404) trouble = `UPCitemdb answered ${r.status}.`;
+    } catch { /* offline, blocked or timed out: the server tries */ }
+    try {
+      const s = await get(`/api/barcode/${code}/lookup`);
+      if (s.product) return s;
+      if (s.errors?.length) return { trouble: trouble || 'The barcode services could not be reached from the server (' + s.errors[0] + ').' };
+      return trouble ? { trouble } : s;
+    } catch (e) { return { trouble: trouble || e.message }; }
   }
 
   async function begin() {
@@ -226,7 +253,7 @@ export default async function ({ el, needLogin, go }) {
   };
 
   // Back from adding an unknown disc: look those codes up again.
-  for (const it of S.items.filter((x) => ['unknown', 'pending', 'looking', 'searching', 'found'].includes(x.state))) {
+  for (const it of S.items.filter((x) => ['unknown', 'pending', 'looking', 'searching', 'found', 'nolookup'].includes(x.state))) {
     get(`/api/barcode/${it.code}`).then((r) => {
       if (r.items.length === 1) { it.edition = r.items[0]; delete it.found; it.state = me.copies.has(it.edition.id) ? 'added' : 'unknown'; if (it.state === 'unknown') return handle(it.code, false); }
       else if (!r.items.length && !r.pending && it.state !== 'found') return handle(it.code, false);
