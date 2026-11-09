@@ -69,9 +69,22 @@ docker run -p 3000:3000 -v spine-data:/data -e SECURE_COOKIES=1 -e TMDB_API_KEY=
 
 Serve it over HTTPS: the camera scanner and the service worker need it, and iPhone home-screen installs expect it.
 
+### Live instance (Railway)
+
+The production copy runs on Railway from this repo's `main` branch:
+
+- URL: **https://spine-production-88dc.up.railway.app**
+- Project `friendly-alignment` → service `spine`, region US West. Auto-deploys on every push to `main` (Dockerfile build, `railway.json`).
+- Persistent volume `spine-volume` mounted at `/data` (the SQLite file and uploaded images live there).
+- Service variable `PORT=3000` pinned to match the public domain's target port. Railway otherwise injects its own `PORT`, and the domain would point at the wrong port.
+- Railway rejects a `VOLUME` instruction in the Dockerfile, so the volume is attached in the dashboard instead, and the container runs as root so the mounted disk is writable.
+- The first account to sign up becomes the admin.
+
 ## iPhone
 
-For a handful of people, the fastest path is the web app: open the site in Safari, Share → Add to Home Screen. It runs full-screen with the tab bar, remembers sign-in, and the camera scanner works. When you want an App Store listing, wrap the same site with Capacitor (a thin native shell around this web app) and add push notifications there; nothing in the UI needs rewriting.
+A native shell lives in the separate `ios/Spine` Xcode project (WKWebView, camera permission, pull-to-refresh, app icon). It opens the live URL above by default and can be re-pointed from Settings → This iPhone. For a handful of people without the App Store, run it from Xcode onto each phone (free Apple ID; re-run every 7 days) or, with the Apple Developer Program, distribute it through TestFlight.
+
+The web app also installs straight from Safari: Share → Add to Home Screen. It runs full-screen with the tab bar, remembers sign-in, and the camera scanner works.
 
 ## How it's built
 
