@@ -9,12 +9,16 @@ const HINT = { label: 'Warner Bros.', region: '2', standard: 'PAL' };
 const RATE_LIMITED = { product: null, parsed: null, film: null, errors: ['upcitemdb: rate limited'], cached: false, hint: HINT };
 const READ = { product: { source: 'upcitemdb', title: DUNKIRK.title, brand: 'Warner', images: DUNKIRK.images }, parsed: { title: 'Dunkirk', year: 2017, format: 'uhd', label: 'Warner Bros.', region: '2', standard: 'PAL' }, film: { tmdb_id: 374720, title: 'Dunkirk', year: 2017 }, hint: HINT };
 
-// A fake server: GET lookup answers `lookup` (or throws it), POST identify answers `read` (or throws it); every call is recorded.
-function server({ lookup = RATE_LIMITED, read = READ } = {}) {
+const NOT_KNOWN = { product: null, parsed: null, film: null, errors: [], cached: false, known: false, hint: HINT };
+
+// A fake server: GET lookup?cached=1 answers `own` (Spine's own records), any other GET lookup answers `lookup`,
+// POST identify answers `read`; each may be an Error to throw. Every call is recorded.
+function server({ own = NOT_KNOWN, lookup = RATE_LIMITED, read = READ } = {}) {
   const calls = [];
   const answer = (x) => { if (x instanceof Error) throw x; return x; };
-  return { calls, get: async (u) => { calls.push(['GET', u]); return answer(lookup); }, post: async (u, b) => { calls.push(['POST', u, b]); return answer(read); } };
+  return { calls, get: async (u) => { calls.push(['GET', u]); return answer(u.endsWith('?cached=1') ? own : lookup); }, post: async (u, b) => { calls.push(['POST', u, b]); return answer(read); } };
 }
+const silentPhone = { canNative: () => true, native: async () => { throw new Error('the phone must not be asked'); }, fetchImpl: null };
 const apiError = (status, message) => Object.assign(new Error(message), { status });
 const phone = (reply) => ({ canNative: () => true, native: async () => reply, fetchImpl: null });
 const browser = (fetchImpl) => ({ canNative: () => false, fetchImpl });
@@ -24,17 +28,43 @@ test('the phone finds the product: the server reads it, and the answer says it c
   const s = server();
   const r = await identify('5051892210034', { ...phone(ok({ code: 'OK', total: 1, items: [DUNKIRK] })), ...s });
   assert.equal(r.via, 'phone'); assert.equal(r.parsed.title, 'Dunkirk'); assert.equal(r.film.tmdb_id, 374720); assert.equal(r.trouble, undefined);
-  assert.deepEqual(s.calls.map((c) => c[0] + ' ' + c[1]), ['POST /api/barcode/5051892210034/identify']);
-  assert.deepEqual(s.calls[0][2].product, productFromItem(DUNKIRK));
-  assert.equal(s.calls[0][2].product.titles[0], DUNKIRK.offers[0].title);
-  assert.equal(r.diag.via, 'phone'); assert.equal(r.diag.phone.status, 200); assert.equal(r.diag.phone.ms, 310); assert.equal(r.diag.server.step, 'identify'); assert.ok(r.diag.ms >= 0);
+  assert.deepEqual(s.calls.map((c) => c[0] + ' ' + c[1]), ['GET /api/barcode/5051892210034/lookup?cached=1', 'POST /api/barcode/5051892210034/identify']);
+  assert.deepEqual(s.calls[1][2].product, productFromItem(DUNKIRK));
+  assert.equal(s.calls[1][2].product.titles[0], DUNKIRK.offers[0].title);
+  assert.equal(r.diag.via, 'phone'); assert.equal(r.diag.own.known, false); assert.equal(r.diag.phone.status, 200); assert.equal(r.diag.phone.ms, 310); assert.equal(r.diag.server.step, 'identify'); assert.ok(r.diag.ms >= 0);
+});
+
+test("Spine's own records answer first: a product found before costs no outside lookup", async () => {
+  const s = server({ own: { ...READ, errors: [], cached: true, known: true } });
+  const r = await identify('5051892210034', { ...silentPhone, ...s });
+  assert.equal(r.via, 'spine'); assert.equal(r.parsed.title, 'Dunkirk'); assert.equal(r.film.tmdb_id, 374720); assert.equal(r.trouble, undefined);
+  assert.deepEqual(s.calls.map((c) => c[0] + ' ' + c[1]), ['GET /api/barcode/5051892210034/lookup?cached=1']);
+  assert.equal(r.diag.own.known, true); assert.equal(r.diag.phone, null);
+});
+
+test("a disc no source has is answered from Spine's records, with the barcode's hints, without asking the phone again", async () => {
+  const s = server({ own: { ...NOT_KNOWN, cached: true, known: true } });
+  const r = await identify('5051892251990', { ...silentPhone, ...s });
+  assert.equal(r.via, 'spine'); assert.equal(r.product, null); assert.equal(r.trouble, undefined); assert.deepEqual(r.hint, HINT);
+  assert.equal(s.calls.length, 1);
+});
+
+test("when Spine's records can't be asked the lookup carries on outside, and the diagnostics skip them on purpose", async () => {
+  let s = server({ own: apiError(0, 'Could not reach Spine. Check your connection and try again.') });
+  let r = await identify('5051892210034', { ...phone(ok({ items: [DUNKIRK] })), ...s });
+  assert.equal(r.via, 'phone'); assert.equal(r.diag.own.status, 0);
+  s = server({ own: { ...READ, errors: [], cached: true, known: true } });
+  r = await identify('5051892210034', { ...phone(ok({ items: [DUNKIRK] })), ...s, ownFirst: false });
+  assert.equal(r.via, 'phone'); assert.equal(r.diag.own, null);
+  assert.deepEqual(s.calls.map((c) => c[1]), ['/api/barcode/5051892210034/identify']);
 });
 
 test('UPCitemdb answering 200 with no items is a known unknown with the barcode hints, not a failure, even while the server is rate limited', async () => {
   const s = server();
   const r = await identify('5051892251990', { ...phone(ok({ code: 'OK', total: 0, offset: 0, items: [] })), ...s });
   assert.equal(r.product, null); assert.equal(r.trouble, undefined); assert.equal(r.via, 'phone'); assert.deepEqual(r.hint, HINT);
-  assert.deepEqual(s.calls.map((c) => c[0] + ' ' + c[1]), ['GET /api/barcode/5051892251990/lookup']);
+  // The server is told UPCitemdb already said no, so it asks only its other sources (and can remember the miss).
+  assert.deepEqual(s.calls.map((c) => c[0] + ' ' + c[1]), ['GET /api/barcode/5051892251990/lookup?cached=1', 'GET /api/barcode/5051892251990/lookup?upcitemdb=none']);
   assert.deepEqual(r.diag.server.errors, ['upcitemdb: rate limited']);   // recorded for the diagnostics row, not shown as the verdict
 });
 
