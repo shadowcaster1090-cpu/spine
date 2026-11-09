@@ -1,5 +1,5 @@
 // Runs before first paint: applies the saved theme so the page never flashes the wrong colours,
-// and draws the film grain tile that the stylesheet lays over everything (--grain).
+// and draws the film grain tile that the stylesheet prints on the page and on every sleeve (--grain).
 try {
   var t = localStorage.getItem('spine-theme');
   if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
