@@ -65,6 +65,31 @@ export const PROVIDERS = [
       if (!p || !p.success || !(p.title || p.description)) return null;
       return { source: 'upcdatabase', code, title: p.title || p.description || '', brand: p.brand || '', description: p.description || '', category: p.category || '', images: (p.images || []).filter((u) => /^https?:\/\//.test(u)), titles: [] };
     }
+  },
+  {
+    // EAN-Search.org (ean-search.org/ean-api-intro.html): a paid, token-based API with wide European
+    // coverage; product names only, no images. Asked last, so its monthly quota goes only on discs the
+    // free sources lack. Server-side only: the token must never reach the page or the phone.
+    id: 'eansearch',
+    name: 'EAN-Search.org',
+    enabled: () => !!env('EANSEARCH_TOKEN'),
+    async lookup(code, fetchImpl) {
+      if (code.length === 12) return null;   // the same code as EAN-13 (leading 0) is asked as well; one query is enough
+      const base = env('EANSEARCH_BASE') || 'https://api.ean-search.org';
+      const res = await fetchImpl(`${base}/api?token=${encodeURIComponent(env('EANSEARCH_TOKEN'))}&op=barcode-lookup&format=json&ean=${encodeURIComponent(code)}`, { headers: { accept: 'application/json', 'user-agent': UA }, signal: AbortSignal.timeout(7000) });
+      if (res.status === 404) return null;
+      if (res.status === 429) throw new Error('rate limited');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { if (/not found/i.test(text)) return null; throw new Error('unreadable answer'); }
+      const p = Array.isArray(data) ? data[0] : data;
+      if (!p) return null;
+      // A miss and a failure look alike ({error: "…"}); only "not found" is a clean miss worth remembering.
+      if (p.error) { if (/not found/i.test(p.error)) return null; throw new Error(String(p.error).slice(0, 80)); }
+      if (!p.name) return null;
+      return { source: 'eansearch', code, title: String(p.name), brand: '', description: '', category: String(p.categoryName || ''), images: [], titles: [] };
+    }
   }
 ];
 
@@ -135,22 +160,47 @@ const NOISE = [
   /\b(disc|discs|box ?set|boxset|collection|the complete( series| collection)?|season \d+|series \d+)\b/gi,
   /\b(special|collector'?s|limited|deluxe|ultimate|definitive|anniversary|\d+(st|nd|rd|th)[- ]anniversary|restored|remastered|digitally remastered|extended|unrated|uncut|theatrical|director'?s cut|final cut|steelbook|digibook|digipak|slipcase|slipcover|keep ?case)\s*(edition|cut|version|release)?\b/gi,
   /\b(feature film|the movie|the film|motion picture)\s*$/gi,
+  // Combo-pack extras ("4K + Blu-ray + Digital", "Includes Digital Copy", "Double Play") and retailer exclusives.
+  /(\+\s*|\b(?:includes?|with|plus)\s+)digital\b(?: (?:hd|copy|download|code|version|ultraviolet))?|\bdigital (?:hd|copy|download|code|version)\b|\bultraviolet\b|\buv copy\b|\bcombo(?: pack)?\b|\bdouble play\b|\btriple play\b|\bbonus disc\b/gi,
+  /\b(?:zavvi|hmv|amazon|best buy|target|walmart|fnac)\s+exclusive\b|\b(?:zavvi|hmv)\b/gi,
   /\b(with|starring|stars|featuring)\b.*$/gi
 ];
 const LABEL_WORDS = /\b(the criterion collection|criterion collection|criterion|arrow|eureka|kino|shout|masters of cinema|arrow video|arrow academy|arrow films|studio ?canal|warner (bros\.?|brothers|home video|archive)|sony pictures( home entertainment)?|columbia tristar|20th century fox|twentieth century fox|walt disney|buena vista|universal (pictures|studios)|paramount( pictures)?|kino lorber|shout! factory|scream factory|vinegar syndrome|second sight|indicator|powerhouse films|bfi|eureka( entertainment)?|artificial eye|curzon|optimum( releasing| home entertainment)?|momentum pictures|entertainment in video|tartan( video)?|anchor bay|lions ?gate|network|88 films|radiance films|severin|dogwoof|fabulous films|signal one|metrodome|mgm|hbo|bbc)\b/gi;
 
 // GS1 company prefixes of home-video distributors: even a disc no database knows tells us its label.
-// Prefixes are as printed on EAN-13s (US UPCs with a leading 0). Confident entries only; the member can change it.
+// Prefixes are the first 7 digits of the EAN-13 (US UPCs with a leading 0). Every entry was checked against
+// complete barcodes of real discs in Nov 2026 (test/lookup.test.js names one disc per prefix). A prefix several
+// labels share is left out rather than guessed: MVD's 0760137 (Arrow US, Radiance, Severin…), 0191329 (Universal's,
+// also on Paramount discs since 2023), 5037899 (Anime Limited, Indicator, 88 Films, 101 Films), 5060105 (Altitude,
+// Sparky Pictures), 5060952 (Fabulous Films, Altitude). The member can always change the label.
 export const COMPANY_PREFIXES = [
-  ['0715515', 'The Criterion Collection'], ['0025192', 'Universal'], ['0025193', 'Universal'], ['0043396', 'Sony Pictures'], ['0883929', 'Warner Bros.'],
-  ['0085391', 'Warner Bros.'], ['0012569', 'Warner Bros.'], ['0097361', 'Paramount'], ['0032429', 'Paramount'], ['0024543', '20th Century Fox'],
-  ['0786936', 'Disney'], ['0031398', 'Lionsgate'], ['0738329', 'Kino Lorber'], ['0826663', 'Shout! Factory'], ['0012236', 'MGM'], ['0027616', 'MGM'],
-  ['5050582', 'Universal'], ['5053083', 'Universal'], ['5050629', 'Sony Pictures'], ['5035822', 'Sony Pictures'], ['5051892', 'Warner Bros.'], ['7321900', 'Warner Bros.'],
-  ['5055761', 'Lionsgate'], ['5060052', 'Lionsgate'], ['5051429', 'Entertainment One'], ['5039036', 'Entertainment in Video'], ['5035673', 'BFI'],
-  ['5027035', 'Arrow Video'], ['5014437', 'Paramount'], ['5017188', 'Paramount'], ['5055201', 'Arrow Video'], ['5060105', 'Second Sight'], ['5028836', 'Second Sight'],
-  ['5060000', 'Eureka Entertainment'], ['5055744', 'Eureka Entertainment'], ['5021866', 'Network'], ['5027182', 'Dogwoof'], ['5060697', 'Indicator'], ['5037899', 'StudioCanal'],
-  ['5055201', 'Arrow Video'], ['5019322', 'Momentum Pictures'], ['5036193', 'Artificial Eye'], ['5021866', 'Network'], ['5060352', 'Arrow Video'], ['8717418', 'Universal'],
-  ['9398700', 'Universal'], ['9397810', 'Warner Bros.'], ['9321337', 'Umbrella Entertainment'], ['4010232', 'Universal'], ['4011976', 'Warner Bros.'], ['4030521', 'Sony Pictures']
+  // United States and Canada
+  ['0715515', 'The Criterion Collection'], ['0025192', 'Universal'], ['0025193', 'Universal'], ['0043396', 'Sony Pictures'],
+  ['0883929', 'Warner Bros.'], ['0085391', 'Warner Bros.'], ['0012569', 'Warner Bros.'], ['0888574', 'Warner Archive'], ['0794043', 'New Line'], ['0026359', 'HBO'],
+  ['0097361', 'Paramount'], ['0032429', 'Paramount'], ['0024543', '20th Century Fox'], ['0786936', 'Disney'], ['0027616', 'MGM'], ['0667068', 'DreamWorks'],
+  ['0031398', 'Lionsgate'], ['0012236', 'Lionsgate'],   // 0012236: the Artisan / LIVE catalogue, now Lionsgate's
+  ['0738329', 'Kino Lorber'], ['0826663', 'Shout! Factory'], ['0654930', 'Synapse Films'], ['0827058', 'Blue Underground'], ['0814456', 'Vinegar Syndrome'],
+  ['0663390', 'Severin Films'], ['0887090', 'Olive Films'], ['0811956', 'Twilight Time'], ['0617311', 'Flicker Alley'], ['0876964', 'Magnolia'], ['0810180', 'A24'],
+  ['0812491', 'Well Go USA'], ['0683904', 'Mill Creek'], ['0014381', 'Image Entertainment'], ['0013132', 'Anchor Bay'], ['0841887', 'PBS'], ['0054961', 'Acorn Media'],
+  ['0843276', 'Mondo Macabro'], ['0881190', 'Cult Epics'], ['0790357', 'Troma'], ['0795975', 'Zeitgeist'], ['0720229', 'First Run Features'],
+  ['0704400', 'Funimation'], ['0782009', 'VIZ Media'], ['0669198', 'Bandai'], ['0013023', 'Pioneer'], ['0814131', 'Sentai Filmworks'], ['0816726', 'Sentai Filmworks'], ['0875707', 'Discotek Media'],
+  // United Kingdom. UK Warner discs also carry Swedish-registered 7321900 codes, and Disney's Dutch 8717418 ones.
+  ['5050582', 'Universal'], ['5053083', 'Universal'], ['5050629', 'Sony Pictures'], ['5050630', 'Sony Pictures'], ['5035822', 'Sony Pictures'],
+  ['5051892', 'Warner Bros.'], ['7321900', 'Warner Bros.'], ['5014437', 'Paramount'], ['5051368', 'Paramount'], ['5017188', 'Disney'], ['8717418', 'Disney'],
+  ['5039036', '20th Century Fox'], ['5050070', 'MGM'], ['5055761', 'Lionsgate'], ['5060052', 'Lionsgate'], ['5060223', 'Lionsgate'],
+  ['5030305', 'Entertainment One'], ['5055744', 'Entertainment One'], ['5017239', 'Entertainment in Video'], ['5051429', 'Icon'],
+  ['5060116', 'Momentum Pictures'], ['5060049', 'Momentum Pictures'], ['5055201', 'StudioCanal'],   // 5055201: Optimum Releasing, now StudioCanal UK
+  ['5027035', 'Arrow Video'], ['5035673', 'BFI'], ['5022655', 'BFI'], ['5060000', 'Eureka Entertainment'], ['5028836', 'Second Sight'], ['5060697', 'Indicator'],
+  ['5060710', '88 Films'], ['5060496', '88 Films'], ['5060974', 'Radiance Films'], ['5060114', 'Second Run'], ['5060148', 'Third Window Films'],
+  ['5027626', 'Network'], ['5021866', 'Curzon'], ['5036193', 'Acorn Media'], ['5050968', 'Dogwoof'], ['5019322', 'Simply Media'], ['5060020', 'Anchor Bay'],
+  ['5023965', 'Tartan'], ['5060262', 'Signature Entertainment'], ['5030697', 'Fabulous Films'], ['5060758', 'Kaleidoscope'], ['5060018', 'Peccadillo'], ['5060265', 'Peccadillo'],
+  ['5022366', 'Manga Entertainment'], ['5060067', 'MVM Entertainment'],
+  // Germany
+  ['4030521', 'Sony Pictures'], ['4010232', '20th Century Fox'], ['4011976', 'Constantin Film'],
+  // Australia and New Zealand (Roadshow also releases Warner Bros. films there)
+  ['9398700', 'Roadshow Entertainment'], ['9398710', 'Roadshow Entertainment'], ['9398711', 'Roadshow Entertainment'], ['9325336', 'Warner Bros.'],
+  ['9321337', '20th Century Fox'], ['9324915', 'Paramount'], ['9398540', 'Disney'], ['9398580', 'Disney'], ['9344256', 'Umbrella Entertainment'],
+  ['9322225', 'Madman'], ['9345228', 'Shock Entertainment']
 ];
 export function labelFromBarcode(code) {
   const c = String(code).replace(/\D/g, '');
@@ -230,7 +280,7 @@ export function labelOf(...texts) {
   return '';
 }
 
-const tidy = (s) => s.replace(/\s+/g, ' ').replace(/[\s\-–—:,;·|/]+$/g, '').replace(/^[\s\-–—:,;·|/]+/g, '').trim();
+const tidy = (s) => s.replace(/\s+/g, ' ').replace(/[\s\-–—:,;·|/+]+$/g, '').replace(/^[\s\-–—:,;·|/+]+/g, '').trim();
 const titleCase = (s) => s.replace(/\S+/g, (w) => (w.length > 1 && w === w.toUpperCase() && /[A-Z]{3,}/.test(w)) || w === w.toLowerCase() ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w);
 
 // Turns a retail product title into a film title plus edition facts.
@@ -256,6 +306,7 @@ export function parseProductTitle(raw, { brand = '', code = '', alternatives = [
   s = s.replace(LABEL_WORDS, ' ');
   s = s.replace(FORMAT_WORDS, ' ');
   for (const re of NOISE) s = s.replace(re, ' ');
+  s = s.replace(/(?:\s*\+\s*){2,}/g, ' + ');   // "Title + + " once the formats and digital copies are gone; "Romeo + Juliet" keeps its plus
   if (facts.year) s = s.replace(new RegExp('(?:^|[\\s,-])' + facts.year + '\\s*$'), ' ');
   s = s.replace(/\s[-–—:|/]\s.*$/, (m) => (m.length > s.length * .6 ? ' ' : m)); // a long tail after a dash is usually a subtitle: keep; a short one is noise
   s = tidy(s).replace(/\s*[-–—:,;]+\s*$/, '');
