@@ -17,6 +17,9 @@ Spine is a film diary in the Letterboxd mould, joined to a Discogs-style registe
 - Public profiles with a collection, diary, watchlist and lists; each can be made private in settings.
 - Compare two members: taste match, films you've both seen with both ratings, films they've seen that you haven't, discs on their shelf that aren't on yours.
 
+**Letterboxd import**
+- Upload the export zip from letterboxd.com → Settings → Data and Spine brings over the diary (dates, half-star ratings, rewatches), reviews, likes and watchlist, matching films to the register and adding the ones it doesn't know by title and year. Importing twice adds nothing.
+
 **Streaming services**
 - Netflix, Prime Video and the rest offer no API for viewing history, so Spine takes the history file they let you download (Netflix: *Account → Viewing activity → Download all*; Amazon: *Request your data*). It skips TV episodes, trailers and autoplayed previews, matches titles to films on the register (with fuzzy matching and a review step), and logs each viewing with the right date.
 - Trakt is a real API. Connect it once (set `TRAKT_CLIENT_ID` and `TRAKT_CLIENT_SECRET`) and Spine pulls new movie history every time you open the app. Trakt's free scrobbler extensions record what you play on Netflix, Prime Video, Disney+ and others.

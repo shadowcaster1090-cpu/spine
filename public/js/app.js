@@ -28,6 +28,7 @@ const ROUTES = [
   [/^\/add$/, 'add'],
   [/^\/scan$/, 'scan'],
   [/^\/streaming$/, 'streaming'],
+  [/^\/import$/, 'import'],
   [/^\/contributions$/, 'contributions'],
   [/^\/mod(?:\/(queue|reviewed|members))?$/, 'mod', ['tab']],
   [/^\/notifications$/, 'notifications'],
@@ -99,7 +100,7 @@ export function refreshHeader() {
       <div class="menu-pop" role="menu">
         <a href="/u/${esc(u.username)}"><span>Profile</span><span class="dim2">${esc(u.username)}</span></a>
         <a href="/diary">Diary</a><a href="/collection">Shelf</a><a href="/watchlist">Watchlist</a><a href="/wantlist">Wantlist</a>
-        <hr><a href="/scan">Scan discs</a><a href="/add">Add an edition</a><a href="/streaming">Streaming services${me.prompts ? `<span class="pill accent">${me.prompts}</span>` : ''}</a><a href="/contributions">Contributions</a>
+        <hr><a href="/scan">Scan discs</a><a href="/add">Add an edition</a><a href="/streaming">Streaming services${me.prompts ? `<span class="pill accent">${me.prompts}</span>` : ''}</a><a href="/import">Import from Letterboxd</a><a href="/contributions">Contributions</a>
         ${isMod() ? `<a href="/mod">Moderation ${me.pending ? `<span class="pill accent">${me.pending}</span>` : ''}</a>` : ''}
         <hr><a href="/settings">Settings</a><button data-logout>Sign out</button>
       </div></div>`;

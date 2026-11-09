@@ -34,7 +34,8 @@ export default async function view(ctx) {
     <form class="inset" id="pw" style="padding:16px"><div class="form">${field('current_password', 'Current password', { type: 'password', attrs: 'required autocomplete="current-password"' })}${field('new_password', 'New password', { type: 'password', attrs: 'required minlength="8" autocomplete="new-password"', hint: 'At least 8 characters' })}<div class="err"></div><div><button class="btn primary" type="submit">Change password</button></div></div></form>
 
     <div class="group-title">Your data</div>
-    <div class="inset"><a class="row" href="/api/me/export" download><span class="grow"><span class="t">Download my data</span><span class="s">Everything Spine holds about you, as JSON</span></span><span class="chev">›</span></a>
+    <div class="inset"><a class="row" href="/import"><span class="grow"><span class="t">Import from Letterboxd</span><span class="s">Bring your diary, ratings, reviews, likes and watchlist</span></span><span class="chev">›</span></a>
+      <a class="row" href="/api/me/export" download><span class="grow"><span class="t">Download my data</span><span class="s">Everything Spine holds about you, as JSON</span></span><span class="chev">›</span></a>
       <a class="row" href="/api/collection/export.csv" download><span class="grow"><span class="t">Download my collection</span><span class="s">A spreadsheet of your shelf</span></span><span class="chev">›</span></a></div>
 
     ${navigator.userAgent.includes('SpineApp') ? `<div class="group-title">This iPhone</div><div class="inset"><button class="row" id="chsrv"><span class="grow"><span class="t">Change server address</span><span class="s">${esc(location.origin)}</span></span><span class="chev">›</span></button></div>` : ''}

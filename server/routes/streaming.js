@@ -4,6 +4,7 @@ import { requireUser } from '../auth.js';
 import { SERVICES, parseViewingHistory, matchTitle, createBareFilm, normTitle } from '../viewing.js';
 import { watchRows, filmsById } from '../catalogue.js';
 import { tx } from '../db.js';
+import { readZip, importLetterboxd } from '../letterboxd.js';
 
 const TRAKT_API = 'https://api.trakt.tv';
 const oauthStates = new Map(); // state -> { userId, at }
@@ -86,6 +87,24 @@ export default function (r, { db, fail, rateLimit, traktId = process.env.TRAKT_C
         ON CONFLICT (user_id, service) DO UPDATE SET last_sync_at = datetime('now')`).run(user.id, service);
     });
     return result;
+  });
+
+  /* Letterboxd export: a zip or the individual CSVs, previewed then committed */
+  r.post('/api/import/letterboxd', ({ body, user }) => {
+    requireUser(user);
+    rateLimit(String(user.id), 'lb-import', 20, 60 * 60e3);
+    let files = {};
+    if (body.zip) {
+      const buf = Buffer.from(String(body.zip).replace(/^data:[^,]*,/, ''), 'base64');
+      if (buf.length > 40e6) fail(413, 'That export is too large.');
+      try { files = readZip(buf); } catch (e) { fail(400, e.message); }
+    } else if (body.files && typeof body.files === 'object') {
+      for (const [name, text] of Object.entries(body.files)) files[String(name).toLowerCase()] = Buffer.from(String(text), 'utf8');
+    } else fail(400, 'Upload your Letterboxd export zip.');
+    let plan;
+    try { plan = importLetterboxd(db, user.id, files, { commit: !body.dry_run }); } catch (e) { if (e.status) throw e; fail(400, e.message); }
+    if (!body.dry_run) db.prepare('INSERT INTO watch_imports (user_id, service, rows, logged, skipped) VALUES (?, ?, ?, ?, ?)').run(user.id, 'letterboxd', plan.films, plan.watches, plan.skipped);
+    return plan;
   });
 
   /* Trakt: real OAuth, real history. Needs TRAKT_CLIENT_ID and TRAKT_CLIENT_SECRET. */

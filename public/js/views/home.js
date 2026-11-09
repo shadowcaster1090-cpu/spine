@@ -21,6 +21,7 @@ export default async function ({ el, go }) {
         <div class="acts"><button class="btn sm primary" data-review="${w.id}">Rate or review</button><button class="btn sm ghost" data-dismiss="${w.id}">Not now</button></div></div></div>`).join('')}
       ${prompts.items.length > 3 ? `<p class="dim" style="font-size:13px;margin:12px 0 0">${prompts.items.length - 3} more in <a class="link" href="/diary">your diary</a>.</p>` : ''}</section>` : ''}
 
+    ${!m.films && !m.copies ? `<div class="note-banner info" style="margin-top:20px;display:flex;gap:14px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:220px"><b>New here?</b> Bring your Letterboxd diary across in one go, then scan the discs on your shelf.</span><a class="btn sm primary" href="/import">Import Letterboxd</a><a class="btn sm" href="/scan">Scan discs</a></div>` : ''}
     <div class="stat-strip">
       <a href="/diary"><div class="n">${num(m.this_year)}</div><div class="l">Films this year</div></a>
       <a href="/u/${esc(me.user.username)}/films"><div class="n">${num(m.films)}</div><div class="l">Films watched</div></a>

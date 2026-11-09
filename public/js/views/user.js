@@ -100,7 +100,7 @@ async function diary(box, u, own, query, base, rerender) {
         <div style="min-width:0"><a class="t" href="/film/${w.film.id}">${esc(w.film.title)} <span class="dim" style="font-weight:400">${w.film.year || ''}</span></a>
           <div class="s">${viaTag(w)}${w.rewatch ? `<span title="Rewatch" style="display:inline-flex;width:13px">${I.repeat}</span>` : ''}${w.review ? `<a href="/review/${w.id}" class="link">Review</a>` : ''}${w.source !== 'manual' ? '<span class="pill">imported</span>' : ''}</div></div>
         <div class="r">${w.rating ? stars10(w.rating) : '<span class="dim2" style="font-size:12px">unrated</span>'}${w.liked ? `<span class="heart on" style="display:inline-flex;width:16px">${I.heart}</span>` : ''}${own ? `<button class="btn sm ghost" data-edit="${w.id}">Edit</button>` : ''}</div>
-      </div>`).join('')}</div>`).join('')}</div>` : `<div class="empty">${own ? 'Your diary is empty. Log a film, or <a href="/streaming">import your streaming history</a>.' : 'Nothing in the diary yet.'}</div>`}`;
+      </div>`).join('')}</div>`).join('')}</div>` : `<div class="empty">${own ? 'Your diary is empty. Log a film, <a href="/import">import your Letterboxd history</a>, or <a href="/streaming">connect a streaming service</a>.' : 'Nothing in the diary yet.'}</div>`}`;
   $('#dlog', box)?.addEventListener('click', () => logSheet({ onSaved: rerender }));
   box.onclick = (ev) => { const b = ev.target.closest('[data-edit]'); if (b) logSheet({ watch: r.items.find((w) => w.id === +b.dataset.edit), onSaved: rerender }); };
 }

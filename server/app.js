@@ -159,7 +159,7 @@ export function createApp({ db, uploadsDir, tmdbKey = process.env.TMDB_API_KEY, 
         if (origin && new URL(origin).host !== req.headers.host) fail(403, 'Cross-site request refused.');
       }
       const ip = req.socket.remoteAddress || '';
-      const body = req.method === 'GET' ? {} : await readBody(req, pathname.endsWith('/images') ? 8e6 : pathname.endsWith('/import') || pathname.includes('/import/') ? 6e6 : 2e5);
+      const body = req.method === 'GET' ? {} : await readBody(req, pathname.endsWith('/images') ? 8e6 : pathname.endsWith('/import') || pathname.includes('/import/') ? 60e6 : 2e5);
       const user = sessionUser(db, req);
       const out = await found.handler({ req, res, params: found.params, query: url.searchParams, body, user, ip });
       if (res.writableEnded) return;
