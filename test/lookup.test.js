@@ -339,3 +339,50 @@ test('EAN-Search answers only with a token, after the free sources; misses and f
     assert.equal(r.data.cached, true); assert.equal(eanAsked.filter((e) => e === '5012345678900').length, 1);
   } finally { delete process.env.EANSEARCH_TOKEN; delete process.env.EANSEARCH_BASE; }
 });
+
+test("Spine's own barcode records answer without any outside lookup, and remember discs no source has", async () => {
+  const before = hits.upc;
+  let r = await admin('GET', '/api/barcode/5099999999992/lookup?cached=1');   // never seen
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.product, null); assert.equal(r.data.known, false);
+  r = await admin('GET', '/api/barcode/5051892210034/lookup?cached=1');      // the phone posted Dunkirk earlier
+  assert.equal(r.data.known, true); assert.equal(r.data.cached, true); assert.equal(r.data.parsed.title, 'Dunkirk'); assert.equal(r.data.film.tmdb_id, 374720);
+  // The phone was told "no items" by UPCitemdb: the server skips it, asks the rest, and remembers the clean miss.
+  r = await admin('GET', '/api/barcode/5000000000001/lookup?upcitemdb=none');
+  assert.equal(r.data.product, null); assert.deepEqual(r.data.errors, []); assert.equal(r.data.known, true);
+  r = await admin('GET', '/api/barcode/5000000000001/lookup?cached=1');
+  assert.equal(r.data.known, true); assert.equal(r.data.product, null); assert.equal(r.data.cached, true);
+  assert.equal(hits.upc, before, 'UPCitemdb was never asked');
+});
+
+test('the barcode database exports to a spreadsheet and imports one, for moderators only', async () => {
+  const member = client();
+  await member('POST', '/api/auth/signup', { username: 'bea', email: 'bea@example.com', password: 'correct horse' });
+  for (const [m, u, b] of [['GET', '/api/barcodes/stats'], ['GET', '/api/barcodes/export.csv'], ['POST', '/api/barcodes/import', { csv: 'barcode,title\n5099999000011,X' }]]) {
+    assert.equal((await member(m, u, b)).status, 403, u);
+  }
+  const csv = 'Barcode,Title,Label\n5099999000011,Some Film [Blu-ray] [1971],Arrow\n5051892210034,Dunkirk,Warner\nnot-a-code,No barcode,\n5000000000001,Filled In Over A Miss,Nobody\n';
+  let r = await admin('POST', '/api/barcodes/import', { csv });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual([r.data.added, r.data.already, r.data.skipped], [2, 1, 1]);   // Dunkirk is on the register; a miss can be filled in
+  r = await admin('POST', '/api/barcodes/import', { csv: '5099999000028,Another Film [DVD]\n5099999000011,Should Not Replace\n' });   // no header row
+  assert.deepEqual([r.data.added, r.data.already, r.data.skipped], [1, 1, 0]);
+  assert.equal(r.data.stats.imported, 3);
+  // A scan of an imported code is answered from Spine's records, read like any retail title.
+  r = await admin('GET', '/api/barcode/5099999000011/lookup?cached=1');
+  assert.equal(r.data.known, true); assert.equal(r.data.product.source, 'import'); assert.equal(r.data.parsed.title, 'Some Film');
+  assert.equal(r.data.parsed.year, 1971); assert.equal(r.data.parsed.format, 'bluray'); assert.equal(r.data.parsed.label, 'Arrow Video');
+  // The export has every barcode Spine knows, and reimporting it adds nothing.
+  const exp = await admin('GET', '/api/barcodes/export.csv');
+  assert.equal(exp.status, 200);
+  const text = String(exp.data);
+  assert.match(text.split('\r\n')[0], /^barcode,status,title,label_or_brand,source,updated$/);
+  assert.match(text, /\r\n5051892210034,on the register,Dunkirk \(2017\),Warner Bros\.,register,/);
+  assert.match(text, /\r\n5099999000011,product,Some Film \[Blu-ray\] \[1971\],Arrow,import,/);
+  assert.doesNotMatch(text, /\r\n5051892210034,product,/, 'a disc on the register is listed once, as on the register');
+  assert.match(text, /,no source has it,/);
+  r = await admin('POST', '/api/barcodes/import', { csv: text });
+  assert.equal(r.data.added, 0);
+  const stats = (await admin('GET', '/api/barcodes/stats')).data;
+  assert.ok(stats.register >= 3 && stats.products >= 5 && stats.unknown >= 1, JSON.stringify(stats));
+});
