@@ -2,6 +2,7 @@ import { get, post, del, me } from '../api.js';
 import { esc, cover, regTag, setTitle, toast, $ } from '../ui.js';
 import { copyModal } from '../forms.js';
 import { startScanner, decodeFile, normalise, unlockFeedback, feedback } from '../scan.js';
+import { canNativeFetch, nativeFetch } from '../bridge.js';
 
 const KEY = 'spine-scan-session';
 const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY)) || { mode: 'shelf', items: [] }; } catch { return { mode: 'shelf', items: [] }; } };
@@ -160,17 +161,21 @@ export default async function ({ el, needLogin, go }) {
   // the server asks only when the phone cannot. Either way the server reads the answer and finds the film.
   async function identify(code) {
     let trouble = '';
+    const url = `https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`;
     try {
-      const r = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(code)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(7000) });
-      if (r.status === 429) trouble = 'UPCitemdb has had its 100 free lookups from this connection today.';
-      else if (r.ok) {
-        const data = await r.json();
+      // The service refuses cross-origin browser calls, so only the iPhone shell can ask it from here.
+      let status = 0, text = '';
+      if (canNativeFetch()) ({ status, body: text } = await nativeFetch(url));
+      else { const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(7000) }); status = r.status; text = await r.text(); }
+      if (status === 429) trouble = 'UPCitemdb has had its 100 free lookups from this phone today.';
+      else if (status === 200) {
+        const data = JSON.parse(text);
         const item = (data.items || [])[0];
         if (item) {
           return await post(`/api/barcode/${code}/identify`, { product: { source: 'upcitemdb', title: item.title, brand: item.brand, description: item.description, category: item.category, images: item.images, titles: (item.offers || []).map((o) => o.title) } });
         }
         // Known to be unknown there; still let the server try its other sources.
-      } else if (r.status !== 404) trouble = `UPCitemdb answered ${r.status}.`;
+      } else if (status && status !== 404) trouble = `UPCitemdb answered ${status}.`;
     } catch { /* offline, blocked or timed out: the server tries */ }
     try {
       const s = await get(`/api/barcode/${code}/lookup`);
