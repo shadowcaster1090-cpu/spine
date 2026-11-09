@@ -37,6 +37,8 @@ export default async function view(ctx) {
     <div class="inset"><a class="row" href="/api/me/export" download><span class="grow"><span class="t">Download my data</span><span class="s">Everything Spine holds about you, as JSON</span></span><span class="chev">›</span></a>
       <a class="row" href="/api/collection/export.csv" download><span class="grow"><span class="t">Download my collection</span><span class="s">A spreadsheet of your shelf</span></span><span class="chev">›</span></a></div>
 
+    ${navigator.userAgent.includes('SpineApp') ? `<div class="group-title">This iPhone</div><div class="inset"><button class="row" id="chsrv"><span class="grow"><span class="t">Change server address</span><span class="s">${esc(location.origin)}</span></span><span class="chev">›</span></button></div>` : ''}
+
     <div class="group-title">Delete account</div>
     <form class="inset" id="delacc" style="padding:16px"><p class="dim" style="font-size:14px">This removes your account, diary, collection, wantlist, reviews and lists for good. Editions you added to the register stay, without your name.</p>
       <div class="form" style="max-width:360px">${field('password', 'Password to confirm', { type: 'password', attrs: 'required autocomplete="current-password"' })}<div class="err"></div><div><button class="btn danger" type="submit">Delete my account</button></div></div></form>
@@ -63,6 +65,7 @@ export default async function view(ctx) {
     applyTheme(b.dataset.t); $('#theme', el).querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
     await patch('/api/me', { theme: b.dataset.t }); await loadMe();
   };
+  $('#chsrv', el)?.addEventListener('click', () => { try { window.webkit.messageHandlers.spine.postMessage({ type: 'resetServer' }); } catch { toast('Not running in the Spine app', true); } });
   if (location.hash === '#favourites') setTimeout(() => $('#favourites', el)?.scrollIntoView({ block: 'start' }), 50);
 }
 
