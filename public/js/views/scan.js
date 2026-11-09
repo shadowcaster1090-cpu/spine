@@ -79,7 +79,8 @@ export default async function ({ el, needLogin, go }) {
     const f = it.found, film = f.film, p = f.parsed;
     const title = film?.title || p.title || f.product.title;
     const src = it.coverUrl || film?.poster_url || '';
-    const img = src ? `<div class="cv"><img src="/api/img?u=${encodeURIComponent(src)}" alt="" loading="lazy"></div>` : `<div class="cv gen" style="display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--dim)">?</div>`;
+    const poster = film?.poster_url && film.poster_url !== src ? ` data-fallback="/api/img?u=${encodeURIComponent(film.poster_url)}"` : '';
+    const img = src ? `<div class="cv"><img src="/api/img?u=${encodeURIComponent(src)}" alt="" loading="lazy"${poster}></div>` : `<div class="cv gen" style="display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:var(--dim)">?</div>`;
     const facts = [p.label, FORMAT[p.format], p.region ? `Region ${p.region}${p.standard ? ' ' + p.standard : ''}` : '', p.discs ? `${p.discs} discs` : '', ...p.edition].filter(Boolean);
     return `<div class="wrow scanrow">${img}<div>
         <div class="t">${esc(title)}${film?.year ? ` <span class="dim" style="font-family:var(--font);font-size:13px">${film.year}</span>` : ''}</div>
@@ -110,6 +111,15 @@ export default async function ({ el, needLogin, go }) {
     if (it.coverUrl) q.set('cover_url', it.coverUrl);
     return '/add?' + q;
   };
+  // A retailer's cover link can be dead (Hacksaw Ridge's only UPCitemdb image is on a host that no longer
+  // resolves): the card shows the film's TMDB poster instead of a broken image. Error events don't bubble, so capture.
+  $('#items', el).addEventListener('error', (ev) => {
+    const img = ev.target;
+    if (img.tagName !== 'IMG' || !img.dataset.fallback) return;
+    const next = img.dataset.fallback;
+    delete img.dataset.fallback;
+    img.src = next;
+  }, true);
   const paint = () => {
     $('#items', el).innerHTML = S.items.length ? S.items.map(row).join('') : '<p class="dim" style="padding:16px 0">Nothing scanned yet.</p>';
     const n = S.items.filter((i) => i.state === 'added').length, w = S.items.filter((i) => i.state === 'wanted').length;
