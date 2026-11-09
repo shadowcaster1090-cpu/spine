@@ -178,6 +178,17 @@ export async function decodeFile(file) {
       for (const b of r) { const c = normalise(b.rawValue, b.format); if (c) return c; }
     } catch { /* fall through */ }
   }
+  // ZXing first, on a sensible size.
+  try {
+    const Z = await loadZxing();
+    const reader = new Z.MultiFormatReader();
+    reader.setHints(new Map([[Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]], [Z.DecodeHintType.TRY_HARDER, true]]));
+    for (const maxW of [1600, 2400, 1000]) {
+      const k = Math.min(1, maxW / bmp.width), w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+      const [c, cx] = canvasFor(w, h); cx.drawImage(bmp, 0, 0, w, h);
+      try { const r = reader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c)))); const code = normalise(r.getText(), Z_FORMAT(r)); if (code) return code; } catch { /* next size */ } finally { try { reader.reset(); } catch { /* ignore */ } }
+    }
+  } catch { /* ZXing unavailable: Spine's reader below */ }
   // Try a few sizes and both orientations: phone photos vary a lot.
   for (const maxW of [1600, 1000, 2400]) {
     for (const rot of [0, 90]) {
@@ -252,57 +263,78 @@ export async function startScanner(video, onCode, { continuous = false } = {}) {
     onCode(code);
     if (!continuous) stop();
   };
-  const stop = () => { alive = false; zx?.reset?.(); stream.getTracks().forEach((t) => t.stop()); video.srcObject = null; };
+  const stop = () => { alive = false; stream.getTracks().forEach((t) => t.stop()); video.srcObject = null; };
 
-  let detector = null, zx = null;
+  // Decoders. The native detector where the browser has one; ZXing's core reader (we drive it frame by
+  // frame ourselves, so a bad frame can never stop the loop, which the library's own video loop does);
+  // and Spine's EAN/UPC reader as a last resort. Each frame is offered to all of them.
+  let detector = null;
   if ('BarcodeDetector' in window) {
     try {
       const fm = await window.BarcodeDetector.getSupportedFormats();
       const want = ['ean_13', 'ean_8', 'upc_a', 'upc_e'].filter((f) => fm.includes(f));
       if (want.includes('ean_13')) { detector = new window.BarcodeDetector({ formats: want }); engine = 'native'; }
-    } catch { /* unsupported */ }
+    } catch { detector = null; }
   }
-  if (!detector) {
-    try {
-      const Z = await loadZxing();
-      const hints = new Map([[Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]], [Z.DecodeHintType.TRY_HARDER, true]]);
-      zx = new Z.BrowserMultiFormatReader(hints, 150);
-      engine = 'zxing';
-    } catch { zx = null; }
-  }
+  let Z = null, zreader = null;
+  try {
+    Z = await loadZxing();
+    const hints = new Map([[Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]], [Z.DecodeHintType.TRY_HARDER, true]]);
+    zreader = new Z.MultiFormatReader(); zreader.setHints(hints);
+    if (engine !== 'native') engine = 'zxing';
+  } catch { Z = null; zreader = null; }
 
-  if (zx) {
-    // ZXing reads from the playing <video>; keep our stream and let it poll frames.
+  const [, ctx] = canvasFor(1, 1);
+  const crop = document.createElement('canvas'), cctx = crop.getContext('2d', { willReadFrequently: true });
+  const rot = document.createElement('canvas'), rctx = rot.getContext('2d', { willReadFrequently: true });
+  const rotated = (src) => {   // the frame turned 90°, for a case held sideways
+    if (rot.width !== src.height || rot.height !== src.width) { rot.width = src.height; rot.height = src.width; }
+    rctx.save(); rctx.translate(rot.width / 2, rot.height / 2); rctx.rotate(Math.PI / 2); rctx.drawImage(src, -src.width / 2, -src.height / 2); rctx.restore();
+    return rot;
+  };
+  const zxDecode = (canvas) => {
+    if (!zreader) return null;
     try {
-      zx.decodeFromVideoElementContinuously
-        ? zx.decodeFromVideoElementContinuously(video, (r) => { if (r) emit(r.getText(), Z_FORMAT(r)); })
-        : await zx.decodeFromStream(stream, video, (r) => { if (r) emit(r.getText(), Z_FORMAT(r)); });
-    } catch { zx = null; engine = 'spine'; }
-  }
+      const r = zreader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(canvas))));
+      return r ? [r.getText(), Z_FORMAT(r)] : null;
+    } catch { return null; }   // NotFound and friends: just the next frame
+    finally { try { zreader.reset(); } catch { /* ignore */ } }
+  };
 
-  if (!zx) {
-    const [, ctx] = canvasFor(1, 1);
-    const tick = async () => {
-      if (!alive) return;
-      if (video.readyState >= 2 && video.videoWidth) {
-        if (detector) {
+  let frame = 0;
+  const tick = async () => {
+    if (!alive) return;
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (video.readyState >= 2 && vw && vh) {
+      frame++;
+      try {
+        if (detector && frame % 2 === 0) {
           try { const r = await detector.detect(video); for (const b of r) emit(b.rawValue, b.format); } catch { /* frame not ready */ }
-        } else {
-          // Read the strip under the aiming box at full horizontal resolution.
-          const vw = video.videoWidth, vh = video.videoHeight;
-          const w = Math.min(vw, 1280), k = w / vw, h = Math.round(vh * k);
-          if (ctx.canvas.width !== w || ctx.canvas.height !== h) { ctx.canvas.width = w; ctx.canvas.height = h; }
-          ctx.drawImage(video, 0, 0, w, h);
-          const y0 = Math.round(h * .25), bh = Math.round(h * .5);
-          const code = decodeImageData(ctx.getImageData(0, y0, w, bh), { rows: 14, band: [0.1, 0.9] });
-          // Require two matching frames so a blurred read can't slip through.
+        }
+        // The strip under the aiming box, at up to 1280px across; the barcode is horizontal there.
+        const w = Math.min(vw, 1280), k = w / vw, h = Math.round(vh * k);
+        if (ctx.canvas.width !== w || ctx.canvas.height !== h) { ctx.canvas.width = w; ctx.canvas.height = h; }
+        ctx.drawImage(video, 0, 0, w, h);
+        const y0 = Math.round(h * .22), bh = Math.round(h * .56);
+        if (crop.width !== w || crop.height !== bh) { crop.width = w; crop.height = bh; }
+        cctx.drawImage(ctx.canvas, 0, y0, w, bh, 0, 0, w, bh);
+        let hit = zxDecode(crop);
+        // Every few frames try the whole frame, and the frame turned on its side, in case the disc is held off-centre or sideways.
+        if (!hit && frame % 4 === 0) hit = zxDecode(ctx.canvas);
+        if (!hit && frame % 3 === 1) hit = zxDecode(rotated(ctx.canvas));
+        if (hit) { emit(hit[0], hit[1]); pending = ''; }
+        else {
+          const code = decodeImageData(cctx.getImageData(0, 0, w, bh), { rows: 14, band: [0.1, 0.9] });
+          // Spine's own reader needs two matching frames so a blurred read can't slip through.
           if (code) { if (code === pending) emit(code); pending = code; } else pending = '';
         }
-      }
-      setTimeout(tick, detector ? 120 : 90);
-    };
-    tick();
-  }
+      } catch { /* a bad frame is not a reason to stop */ }
+    }
+    if (alive) setTimeout(tick, 110);
+  };
+  // Start once the camera is really delivering frames.
+  const ready = () => (video.readyState >= 2 && video.videoWidth ? tick() : setTimeout(ready, 60));
+  ready();
 
   const caps = track.getCapabilities?.() || {};
   return {
